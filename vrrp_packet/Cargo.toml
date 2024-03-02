@@ -1,0 +1,10 @@
+[package]
+name = "vrrp_packet"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pnet_macros = "0.34.0"
+pnet_macros_support = "0.34.0"
