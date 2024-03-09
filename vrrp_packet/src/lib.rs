@@ -22,7 +22,8 @@ use pnet_macros_support::types::*;
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 #[packet]
 pub struct VrrpPacket {
-    version: u4,        // version + header type   
+    version: u4,        // version + header type  
+    header_type: u4, 
     vrid: u8,
     priority: u8,
     count_ip: u8,
@@ -40,6 +41,7 @@ pub struct VrrpPacket {
     pub payload: Vec<u8>
 }
 
+// for the variable length IP address
 #[packet]
 pub struct VrrpIpv4 {
     #[payload]

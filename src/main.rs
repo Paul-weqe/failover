@@ -1,8 +1,10 @@
+mod config;
 
-use std::net::Ipv4Addr;
+use config::VrrpConfig;
+use std::fs;
 
 fn main() {
-    let address = Ipv4Addr::new(192, 168, 0, 1);
-    let x = u32::from_be_bytes(address.octets());
-    println!("{x}");
+    let raw_data = fs::read_to_string("vrrp-config.json").unwrap();
+    let parsed_json_data: VrrpConfig = serde_json::from_str(raw_data.as_str()).unwrap();
+    println!("{:?}", parsed_json_data)
 }

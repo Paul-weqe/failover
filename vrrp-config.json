@@ -1,0 +1,13 @@
+{
+    "instance_name": "VR_1",
+    "state": "MASTER",
+    "interface": "enp0s8",
+    "virtual_router_id": 51,
+    "priority": 255,
+    "advert_int": 1,
+    "authentication": {
+        "auth_type": "PASS",
+        "auth_pass": "12345"
+    },
+    "virtual_ipaddress": "192.168.100.185/24"
+}
