@@ -39,14 +39,15 @@ pub struct Vrrp {
     advert_int: u8,
     checksum: u16be,
     
-    #[construct_with(u8, u8, u8, u8)]
-    ip_addresses: Ipv4Addr,
+    #[length="(count_ip * 4)"]
+    ip_addresses: Vec<u8>,
 
     // the following two are only used for backward compatibility. 
     auth_data: u32be,
     auth_data2: u32be,
-
     #[length="0"]
     #[payload]
     pub payload: Vec<u8>
 }
+
+

@@ -1,7 +1,5 @@
 use ipnet::Ipv4Net;
-use network_interface::NetworkInterface;
-use network_interface::Netmask;
-
+use crate::network::networkinterface;
 
 #[derive(Debug)]
 pub struct VirtualRouter {
@@ -17,18 +15,12 @@ pub struct VirtualRouter {
 }
 
 impl VirtualRouter {
+
     pub fn init(&self) {
         log::info!("Creating Network Interface: {}", self.network_interface);
-        let interface = NetworkInterface::new_afinet(
-            &self.network_interface, 
-            self.ip_addresses[0].addr(), 
-            Some(self.ip_addresses[0].netmask()), 
-            Some(self.ip_addresses[0].broadcast()), 
-            501
-        );
         
-        println!("{:#?}", interface);
-        log::debug!("Successfully created network interface {}", self.network_interface);
+        // create virtual interface
         
     }
+
 }
