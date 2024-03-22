@@ -5,9 +5,7 @@ mod converter;
 mod network;
 
 
-use std::{error::Error, fs::File, io::BufReader, path::Path, sync::Arc};
-use tokio_tun::Tun;
-use std::fs::ReadDir;
+use std::{error::Error, fs::File, io::BufReader, path::Path};
 use simple_logger::SimpleLogger;
 
 #[tokio::main]
@@ -17,23 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     let config = read_config_from_json_file("./vrrp-config.json")?;
     let vr = converter::config_to_vr(&config);
     vr.init();
-    network::send_multicast(vr);
-
-    // let tun = Arc::new(
-    //     Tun::builder()
-    //         .name("trial-tun")
-    //         .tap(false)
-    //         .packet_info(false)
-    //         .up()
-    //         .try_build()
-    //         .unwrap()
-    // );
-
-    // let mut buf = [0u8; 1024];
-    // loop {
-    //     let n = tun.recv(&mut buf).await.unwrap();
-    //     println!("reading {} bytes: {:?}", n, &buf[..n]);
-    // }
+    network::send_multicast(vr, &config.network_interface);
 
     Ok(())
 }

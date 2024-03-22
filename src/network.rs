@@ -1,5 +1,3 @@
-
-
 //! checksums related functions module
 //! This module is dedicated to internet checksums functions.
 //!
@@ -7,18 +5,34 @@
 //! calculation to ref. impl. https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs
 //! and rust's rVVRP github 
 
-use std::net::{IpAddr, Ipv4Addr};
-use pnet::{packet::{ip::{IpNextHeaderProtocol, IpNextHeaderProtocols}, ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}, Packet}, transport::transport_channel};
+use std::{net::Ipv4Addr, str::FromStr, time::Duration};
+use pnet::{
+    datalink::{self, Channel, NetworkInterface}, 
+    packet::{
+        ethernet::{EtherTypes, MutableEthernetPacket}, 
+        ip::IpNextHeaderProtocols, 
+        ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}, 
+        Packet
+    }, 
+    util::MacAddr
+};
 use vrrp_packet::MutableVrrpPacket;
 use crate::router::VirtualRouter;
-use pnet::transport::TransportSender;
-use pnet::transport::TransportChannelType::Layer3;
 
-pub fn send_multicast(vrouter: VirtualRouter)  
+pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)  
 {
+    let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
+    let interfaces = datalink::linux::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .filter(interface_names_match)
+        .next()
+        .unwrap();
+
     // build VRRP header
-    let mut vrrp_buffer = [0u8; 192];
-    let mut vrrp_packet: MutableVrrpPacket = MutableVrrpPacket::new(&mut vrrp_buffer).unwrap();
+    // length = 32 + (8 * no_ip)
+    let mut vrrp_buffer: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
+    let mut vrrp_packet: MutableVrrpPacket = MutableVrrpPacket::new(&mut vrrp_buffer[..]).unwrap();
     {
 
         let mut addresses: Vec<u8> = Vec::new();
@@ -51,63 +65,56 @@ pub fn send_multicast(vrouter: VirtualRouter)
             panic!("VRRP configuration VRID={} does not have an ip address", vrrp_packet.get_vrid());
         }
     }
-
+    
     // build IP packet
-    let mut ip_buffer: [u8; 212] = [0u8; 212];
-    let mut ip_packet = MutableIpv4Packet::new(&mut ip_buffer).unwrap();
+    // let mut ip_buffer: [u8; 212] = [0u8; 212];
+    // let ip_len = vrrp_buffer.len() + 20;
+    let ip = interface.ips.first().unwrap().ip();
+    let ip_len = vrrp_packet.packet().len() + 20;
+    let mut ip_buffer: Vec<u8> = vec![0; ip_len];
+    let mut ip_packet = MutableIpv4Packet::new(&mut ip_buffer[..]).unwrap();
     {
         ip_packet.set_version(4);
         ip_packet.set_header_length(5);
         ip_packet.set_dscp(4);
         ip_packet.set_ecn(1);
-        ip_packet.set_total_length(212);
-        ip_packet.set_identification(257);
+        ip_packet.set_total_length(ip_len as u16);
+        ip_packet.set_identification(2118);
         ip_packet.set_flags(Ipv4Flags::DontFragment);
-        ip_packet.set_fragment_offset(257);
+        ip_packet.set_fragment_offset(0);
         ip_packet.set_ttl(255);
         ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Vrrp);
-        ip_packet.set_source(vrouter.ip_addresses[0].addr());
+        ip_packet.set_source(Ipv4Addr::from_str(&ip.to_string()).unwrap());
         ip_packet.set_destination(Ipv4Addr::new(224, 0, 0, 18));
         ip_packet.set_checksum(checksum(&ip_packet.to_immutable()));
         ip_packet.set_payload(&vrrp_packet.packet());
     }
 
-    let protocol = Layer3(IpNextHeaderProtocols::Vrrp);
-    let (mut tx, mut rx) = match transport_channel(4096, protocol) {
-        Ok((tx, rx)) => (tx, rx),
-        Err(e) => panic!(
-            "An error occured while creating the transport channel: {}",
-            e
-        )  
+    // build ethernet packet
+    // let mut ether_buffer: [u8; 292] = [0u8; 292];
+    let mut ether_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
+    let mut ether_packet = MutableEthernetPacket::new(&mut ether_buffer).unwrap();
+    {
+        // ether_packet.set_source(MacAddr(0x00, 0x00, 0x5E, 0x00, 0x01, vrouter.vrid));
+        ether_packet.set_source(interface.mac.unwrap());
+        ether_packet.set_destination(MacAddr(0x01, 0x00, 0x5E, 0x00, 0x00, 0x12));
+        ether_packet.set_ethertype(EtherTypes::Ipv4);
+        ether_packet.set_payload(ip_packet.packet());
+    }
+    
+    let (mut sender, _receiver) = match pnet::datalink::channel(&interface, Default::default()) {
+        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
+        Ok(_) => panic!("Unknown channel type"),
+        Err(e) => panic!("Error happened: {}", e)  
     };
 
-    match tx.send_to(ip_packet, IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))) {
-        Ok(n) => {
-            println!("Packet of size {n} sent");
-        },
-        Err(e) => {
-            log::error!("Error occured: \n {:?}", e);
-            panic!("Unable to send multicast packet");
-        }
-    };
-
-}
-
-pub mod networkinterface {
-    use ipnet::Ipv4Net;
-
-
-    /*
-    * Creates a tun_tap interface on our device. 
-    * This will have the ip address of Ipv4Net 
-    * and mac address will be in the format 00-00-5E-00-01-{vrid}
-    */
-    #[cfg(target_os="linux")]
-    pub fn create_network_interface(
-        iname: &str,
-        ip_address: &Ipv4Net,
-        vrid: u8
-    ) {
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        log::debug!("VRRP advert: {:#?}", &vrrp_packet);
+        sender
+            .send_to(ether_packet.packet(), None)
+            .unwrap()
+            .unwrap();
     }
 
 }
