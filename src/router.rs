@@ -1,5 +1,4 @@
 use ipnet::Ipv4Net;
-use crate::network::networkinterface;
 
 #[derive(Debug)]
 pub struct VirtualRouter {
