@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     let config = read_config_from_json_file("./vrrp-config.json")?;
     let vr = converter::config_to_vr(&config);
     vr.init();
-    network::send_multicast(vr, &config.network_interface);
+    network::send_advertisement(vr);
 
     Ok(())
 }

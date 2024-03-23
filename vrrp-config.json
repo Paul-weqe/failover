@@ -1,8 +1,8 @@
 {
     "name": "VR_1",
     "vrid": 51,
-    "network_interface": "br-31adc0c88f75",
+    "network_interface": "wlo1",
     "ip_addresses": [ 
-        "172.17.0.2/16"
+        "192.168.8.100/24"
     ]
 }

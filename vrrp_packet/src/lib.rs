@@ -1,32 +1,10 @@
-use std::net::Ipv4Addr;
-
 use pnet_macros::packet;
 use pnet_macros_support::types::*;
 
-/// 0                   1                   2                   3
-/// 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |Version| Type  | Virtual Rtr ID|   Priority    | Count IP Addrs|
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |   Auth Type   |   Adver Int   |          Checksum             |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                         IP Address (1)                        |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                            .                                  |
-/// |                            .                                  |
-/// |                            .                                  |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                         IP Address (n)                        |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                     Authentication Data (1)                   |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-/// |                     Authentication Data (2)                   |
-/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
 /// 
-/// NOTE: The checksum is the 16-bit one’s complement of the 
-/// one’s complement sum of the entire VRRP message starting with 
-/// the version field. For computing the checksum, the checksum 
-/// field is set to zero. See RFC 1071 for more detail [CKSM]. 
+/// header of VRRP packet
+/// as described in RFC 3768 (5.1)
 /// 
 #[packet]
 pub struct Vrrp {

@@ -1,10 +1,3 @@
-//! checksums related functions module
-//! This module is dedicated to internet checksums functions.
-//!
-//! credit for rfc1071, propagate_carries and one_complement_sum 
-//! calculation to ref. impl. https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs
-//! and rust's rVVRP github 
-
 use std::{net::Ipv4Addr, str::FromStr, time::Duration};
 use pnet::{
     datalink::{self, Channel, NetworkInterface}, 
@@ -13,15 +6,16 @@ use pnet::{
         ip::IpNextHeaderProtocols, 
         ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}, 
         Packet
-    }, 
-    util::MacAddr
+    }
 };
 use vrrp_packet::MutableVrrpPacket;
-use crate::router::VirtualRouter;
+use crate::{defaults, router::VirtualRouter};
 
-pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)  
+
+
+pub fn send_advertisement(vrouter: VirtualRouter)  
 {
-    let interface_names_match = |iface: &NetworkInterface| iface.name == interface_name;
+    let interface_names_match = |iface: &NetworkInterface| iface.name == vrouter.network_interface;
     let interfaces = datalink::linux::interfaces();
     let interface = interfaces
         .into_iter()
@@ -34,7 +28,6 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
     let mut vrrp_buffer: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
     let mut vrrp_packet: MutableVrrpPacket = MutableVrrpPacket::new(&mut vrrp_buffer[..]).unwrap();
     {
-
         let mut addresses: Vec<u8> = Vec::new();
         for addr in &vrouter.ip_addresses {
             for octet in addr.addr().octets() {
@@ -53,8 +46,7 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
         vrrp_packet.set_auth_data(0);
         vrrp_packet.set_auth_data2(0);
         vrrp_packet.set_ip_addresses(&addresses);
-        vrrp_packet.set_checksum(checksum::rfc1071(&vrrp_packet.packet()));
-
+        vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
 
         if vrrp_packet.get_ip_addresses().len() > 20 {
             log::error!("VRRP packet cannot have more than 20 IP addresses");
@@ -85,7 +77,7 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
         ip_packet.set_ttl(255);
         ip_packet.set_next_level_protocol(IpNextHeaderProtocols::Vrrp);
         ip_packet.set_source(Ipv4Addr::from_str(&ip.to_string()).unwrap());
-        ip_packet.set_destination(Ipv4Addr::new(224, 0, 0, 18));
+        ip_packet.set_destination(defaults::DESTINATION_MULTICAST_IP_ADDRESS);
         ip_packet.set_checksum(checksum(&ip_packet.to_immutable()));
         ip_packet.set_payload(&vrrp_packet.packet());
     }
@@ -95,9 +87,8 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
     let mut ether_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
     let mut ether_packet = MutableEthernetPacket::new(&mut ether_buffer).unwrap();
     {
-        // ether_packet.set_source(MacAddr(0x00, 0x00, 0x5E, 0x00, 0x01, vrouter.vrid));
         ether_packet.set_source(interface.mac.unwrap());
-        ether_packet.set_destination(MacAddr(0x01, 0x00, 0x5E, 0x00, 0x00, 0x12));
+        ether_packet.set_destination(defaults::DESTINATION_MULTICAST_MAC_ADDRESS);
         ether_packet.set_ethertype(EtherTypes::Ipv4);
         ether_packet.set_payload(ip_packet.packet());
     }
@@ -107,9 +98,9 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
         Ok(_) => panic!("Unknown channel type"),
         Err(e) => panic!("Error happened: {}", e)  
     };
-
+    
     loop {
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(vrouter.advert_interval as u64));
         log::debug!("VRRP advert: {:#?}", &vrrp_packet);
         sender
             .send_to(ether_packet.packet(), None)
@@ -120,27 +111,36 @@ pub fn send_multicast(vrouter: VirtualRouter, interface_name: &str)
 }
 
 
-pub mod checksum {
+pub mod checksum 
+{
+    //! checksums related functions module
+    //! This module is dedicated to internet checksums functions.
+    //!
+    //! credit for rfc1071, propagate_carries and one_complement_sum 
+    //! calculation to ref. impl. https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs
+    //! and rust's rVVRP github 
     use byteorder::{ByteOrder, NetworkEndian};
-    const RFC1071_CHUNK_SIZE: usize = 32;
-
+    const _RFC1071_CHUNK_SIZE: usize = 32;
+    
 
     // rfc1071() function
     /// compute rfc1071 internet checksum
     /// returns all-ones if carried checksum is valid
-    pub fn rfc1071(mut data: &[u8]) -> u16 {
+    pub fn _rfc1071(mut data: &[u8]) -> u16 
+    {
+        
         let mut acc = 0;
 
         // for each 32 bytes chunk
-        while data.len() >= RFC1071_CHUNK_SIZE {
-            let mut d = &data[..RFC1071_CHUNK_SIZE];
+        while data.len() >= _RFC1071_CHUNK_SIZE {
+            let mut d = &data[.._RFC1071_CHUNK_SIZE];
             while d.len() >= 2 {
                 // sum adjacent pairs converted to 16 bits integer
                 acc += NetworkEndian::read_u16(d) as u32;
                 // take the next 2 bytes for the next iteration
                 d = &d[2..];
             }
-            data = &data[RFC1071_CHUNK_SIZE..];
+            data = &data[_RFC1071_CHUNK_SIZE..];
         }
 
         // if it does not fit a 32 bytes chunk
@@ -158,14 +158,16 @@ pub mod checksum {
     }
 
     // propagate final complement?
-    pub fn propagate_carries(word: u32) -> u16 {
+    pub fn propagate_carries(word: u32) -> u16 
+    {
         let sum = (word >> 16) + (word & 0xffff);
         ((sum >> 16) as u16) + (sum as u16)
     }
 
     // one_complement_sum() function
     /// returns all-zeros if checksum is valid
-    pub fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 {
+    pub fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
+    {
         let mut sum = 0u32;
         let mut idx = 0;
 

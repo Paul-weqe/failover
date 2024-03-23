@@ -1,17 +1,11 @@
+use std::net::Ipv4Addr;
+use pnet::util::MacAddr;
 
-use rand::{distributions::Alphanumeric, Rng};
 
 pub fn priority() -> u8 { 100 }
 pub fn advert_int() -> u8 { 1 }
 pub fn preempt_mode() -> bool { true }
 
-// create a name for a random network interface with name failnet-{random-5-letter-string}
-pub fn network_interface() -> String {
-    let res = "failnet-".to_string();
-    let s: String =  rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(5)
-        .map(char::from)
-        .collect();
-    res + s.as_str()
-}
+
+pub const DESTINATION_MULTICAST_MAC_ADDRESS: MacAddr = MacAddr(0x01, 0x00, 0x5E, 0x00, 0x00, 0x12);
+pub const DESTINATION_MULTICAST_IP_ADDRESS: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 18);

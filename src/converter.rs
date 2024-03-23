@@ -1,13 +1,10 @@
+use ipnet::Ipv4Net;
 
 use crate::{config, router};
-use ipnet::Ipv4Net;
-use std::f32;
+use std::{f32, str::FromStr};
 
 
-
-/// 
 /// Converts the `crate::config::VrConfig` to `crate::router::VirtualRouter`
-/// This will help in usage accross the system
 pub fn config_to_vr(conf: &config::VRConfig) -> router::VirtualRouter {
 
     // SKEW TIME = (256 * priority) / 256
@@ -17,8 +14,15 @@ pub fn config_to_vr(conf: &config::VRConfig) -> router::VirtualRouter {
     let master_down_interval: f32 = (3 as f32 * conf.advert_interval as f32) + skew_time as f32;
     
     let mut ips: Vec<Ipv4Net> = vec![];
+
     for ip_config in &conf.ip_addresses {
-        ips.push(ip_config.as_str().parse().unwrap());
+        match Ipv4Net::from_str(&ip_config) {
+            Ok(ip_addr) => ips.push(ip_addr),
+            Err(err) => {
+                log::error!("Address '{:?}' not in the correct format", &ip_config);
+                panic!("Error: {err}");
+            }
+        }
     }
 
     router::VirtualRouter {
@@ -32,4 +36,5 @@ pub fn config_to_vr(conf: &config::VRConfig) -> router::VirtualRouter {
         preempt_mode: conf.preempt_mode,
         network_interface: conf.network_interface.clone()
     }
+    
 }
