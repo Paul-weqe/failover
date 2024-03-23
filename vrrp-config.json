@@ -4,5 +4,8 @@
     "network_interface": "wlo1",
     "ip_addresses": [ 
         "192.168.8.100/24"
-    ]
+    ],
+    "priority": 255,
+    "advert_interval": 1,
+    "preempt_mode": true
 }

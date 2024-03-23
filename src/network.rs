@@ -1,19 +1,23 @@
-use std::{net::Ipv4Addr, str::FromStr, time::Duration};
+use std::{net::Ipv4Addr, str::FromStr, sync::mpsc::Receiver, thread, time::Duration};
 use pnet::{
-    datalink::{self, Channel, NetworkInterface}, 
+    datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface}, 
     packet::{
-        ethernet::{EtherTypes, MutableEthernetPacket}, 
-        ip::IpNextHeaderProtocols, 
-        ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}, 
+        arp::{
+            ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket
+        }, 
+        ethernet::{
+            EtherTypes, EthernetPacket, MutableEthernetPacket
+        }, 
+        ip::IpNextHeaderProtocols, ipv4::{checksum, Ipv4Flags, Ipv4Packet, MutableIpv4Packet}, 
         Packet
-    }
+    }, util::MacAddr
 };
-use vrrp_packet::MutableVrrpPacket;
-use crate::{defaults, router::VirtualRouter};
+use vrrp_packet::{MutableVrrpPacket, VrrpPacket};
+use crate::{defaults, router::VirtualRouter, system::{States, Timers}};
 
 
 
-pub fn send_advertisement(vrouter: VirtualRouter)  
+pub fn send_advertisement(mut vrouter: VirtualRouter)  
 {
     let interface_names_match = |iface: &NetworkInterface| iface.name == vrouter.network_interface;
     let interfaces = datalink::linux::interfaces();
@@ -25,6 +29,7 @@ pub fn send_advertisement(vrouter: VirtualRouter)
 
     // build VRRP header
     // length = 32 + (8 * no_ip)
+    log::info!("({}) Setting up advertisement packet", vrouter.name);
     let mut vrrp_buffer: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
     let mut vrrp_packet: MutableVrrpPacket = MutableVrrpPacket::new(&mut vrrp_buffer[..]).unwrap();
     {
@@ -92,22 +97,153 @@ pub fn send_advertisement(vrouter: VirtualRouter)
         ether_packet.set_ethertype(EtherTypes::Ipv4);
         ether_packet.set_payload(ip_packet.packet());
     }
-    
-    let (mut sender, _receiver) = match pnet::datalink::channel(&interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unknown channel type"),
-        Err(e) => panic!("Error happened: {}", e)  
-    };
+
+
+    let (mut sender, mut receiver) = create_datalink_channel(&interface);
     
     loop {
-        std::thread::sleep(Duration::from_secs(vrouter.advert_interval as u64));
-        log::debug!("VRRP advert: {:#?}", &vrrp_packet);
-        sender
-            .send_to(ether_packet.packet(), None)
-            .unwrap()
-            .unwrap();
+
+        let buf = receiver.next().unwrap();
+    
+        match vrouter.system.state{
+
+            // Initialize STATE
+            States::INIT => {
+                if vrouter.priority == 255 {
+                    // send ADVERTISEMENT
+                    log::info!("({}) VRRP ADVERTISEMENT sent", vrouter.name);
+                    sender
+                        .send_to(ether_packet.packet(), None)
+                        .unwrap()
+                        .unwrap();
+
+                    // TODO: add code for gratuitous ARP request with Virtual Router MAC and each of the 
+                    // IP addresses associated with the Virtual Router
+                    {
+                        let mut eth_arp_buffer = [0u8; 42];
+                        let mut eth_arp_packet = MutableEthernetPacket::new(&mut eth_arp_buffer).unwrap();
+                        eth_arp_packet.set_destination(MacAddr::broadcast());
+                        eth_arp_packet.set_source(interface.mac.unwrap());
+                        eth_arp_packet.set_ethertype(EtherTypes::Arp);
+                        
+                        let mut arp_buffer = [0u8; 28];
+                        let mut arp_packet = MutableArpPacket::new(&mut arp_buffer).unwrap();
+                        arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
+                        arp_packet.set_protocol_type(EtherTypes::Ipv4);
+                        arp_packet.set_hw_addr_len(6);
+                        arp_packet.set_proto_addr_len(4);
+                        arp_packet.set_operation(ArpOperations::Request);
+                        arp_packet.set_sender_hw_addr(interface.mac.unwrap());
+                        arp_packet.set_sender_proto_addr(vrouter.ip_addresses[0].addr());
+                        arp_packet.set_target_hw_addr(MacAddr::broadcast());
+                        arp_packet.set_target_proto_addr(vrouter.ip_addresses[0].addr());
+                        eth_arp_packet.set_payload(arp_packet.packet());
+
+                        sender
+                            .send_to(eth_arp_packet.packet(), None)
+                            .unwrap()
+                            .unwrap();
+                        log::info!("({}) Sending ARP packet", vrouter.name);
+
+                    }
+
+                    // adding ARP
+                    vrouter.system.timers = Timers::AdverTimer(vrouter.advert_interval);
+                    vrouter.system.state = States::MASTER;
+                    log::info!("({}) Entered the MASTER state", vrouter.name);
+                }
+
+                else {
+                    vrouter.system.timers = Timers::MasterDownTimer(vrouter.master_down_interval);
+                    vrouter.system.state = States::BACKUP;
+                    log::info!("({}) Entering the BACKUP state", vrouter.name);
+                    
+                }
+            },
+
+
+            // Backup STATE
+            States::BACKUP => {
+
+                let buf = receiver.next().unwrap();
+                // While in Backup State:
+                let eth = EthernetPacket::new(&buf).unwrap();
+                
+                if eth.get_destination() == vrouter.mac() { continue; }
+
+                // - MUST NOT respond to ARP requests for the IP address(s) associated
+                // with the virtual router.
+                let condition_1 = if eth.get_ethertype() == EtherTypes::Arp { true } else { false };
+
+                // - MUST discard packets with a destination link layer MAC address
+                // equal to the virtual router MAC address.
+                let condition_2 = if eth.get_destination() == vrouter.mac() { true } else { false };
+
+                // - MUST NOT accept packets addressed to the IP address(es) associated
+                // with the virtual router.
+                let mut condition_3 = false;
+                
+                if eth.get_ethertype() == EtherTypes::Ipv4 {
+                    let ip = Ipv4Packet::new(eth.payload()).unwrap();
+                    for addr in &vrouter.ip_addresses {
+                        if addr.addr().octets() == ip.get_destination().octets() {
+                            condition_3 = true;
+                            break;
+                        }
+                    }
+                }
+
+                if condition_1 || condition_2 || condition_3 {
+                    continue;
+                }
+
+                // check if advertisement has been received
+                if eth.get_ethertype() == EtherTypes::Ipv4 {
+                    let ip = Ipv4Packet::new(eth.payload()).unwrap();
+                    if ip.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
+                        let received_vrrp_pkt = VrrpPacket::new(ip.payload()).unwrap();
+                        if received_vrrp_pkt.get_header_type() == 1 {
+                            if received_vrrp_pkt.get_priority() == 0 { 
+                                vrouter.system.timers = Timers::MasterDownTimer(vrouter.skew_time);
+                            } else {
+                                if vrouter.preempt_mode == false || received_vrrp_pkt.get_priority() >= vrouter.priority {
+                                    vrouter.system.timers = Timers::MasterDownTimer(vrouter.master_down_interval);
+                                } else {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+
+            // Master STATE
+            States::MASTER => {
+
+                log::info!("I AM MASTER!!");
+                loop  {
+
+                    let rec_eth = EthernetPacket::new(buf).unwrap();
+                    if rec_eth.get_ethertype() == EtherTypes::Arp {
+                        let rec_arp = ArpPacket::new(rec_eth.payload()).unwrap();
+                        println!("gotten ARP");
+                        println!("{:?}......", rec_arp);
+                    }
+
+                }
+            }
+        }
     }
 
+}
+
+
+fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
+    match pnet::datalink::channel(interface, Default::default()) {
+        Ok(Channel::Ethernet(tx, rx)) => return (tx, rx),
+        Ok(_) => panic!("Unknown channel type"),
+        Err(e) => panic!("Error happened: {}", e)
+    }
 }
 
 
@@ -154,11 +290,11 @@ pub mod checksum
             acc += (v as u32) << 8;
         }
 
-        propagate_carries(acc)
+        _propagate_carries(acc)
     }
 
     // propagate final complement?
-    pub fn propagate_carries(word: u32) -> u16 
+    pub fn _propagate_carries(word: u32) -> u16 
     {
         let sum = (word >> 16) + (word & 0xffff);
         ((sum >> 16) as u16) + (sum as u16)
