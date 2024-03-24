@@ -1,5 +1,3 @@
-// use std::net::Ipv4Addr;
-
 use std::{net::Ipv4Addr, str::FromStr};
 
 use pnet::{datalink::NetworkInterface, packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}}, util::MacAddr};
@@ -12,7 +10,8 @@ pub struct MutablePktGenerator {
 
 impl MutablePktGenerator {
     
-    pub fn new<'a>(vrouter: VirtualRouter, interface: NetworkInterface) -> Self {
+    pub fn new<'a>(vrouter: VirtualRouter, interface: NetworkInterface) -> Self 
+    {
         MutablePktGenerator { 
             vrouter, 
             interface 
@@ -81,9 +80,8 @@ impl MutablePktGenerator {
         ether_pkt
     }
 
-    pub fn gen_gratuitous_arp_packet<'a>(
-        &self, eth_buffer: &'a mut [u8], arp_buffer: &'a mut [u8], ip_address: Ipv4Addr
-    ) -> (MutableEthernetPacket<'a>, MutableArpPacket<'a>) {
+    pub fn _gen_gratuitous_arp_packet<'a>(&self, eth_buffer: &'a mut [u8], arp_buffer: &'a mut [u8]) -> (MutableEthernetPacket<'a>, MutableArpPacket<'a>) 
+    {
         let mut eth_arp_packet = MutableEthernetPacket::new(&mut eth_buffer[..]).unwrap();
         eth_arp_packet.set_destination(MacAddr::broadcast());
         eth_arp_packet.set_source(self.interface.mac.unwrap());

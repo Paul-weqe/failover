@@ -1,34 +1,25 @@
 use std::thread;
-
-use pnet::{
-    datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface}, 
-    packet::{
-        arp::ArpPacket, ethernet::{
-            EtherType, EtherTypes, EthernetPacket, MutableEthernetPacket
-        }, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
-    }
+use pnet::packet::{
+    ethernet::{ EtherTypes, EthernetPacket }, 
+    ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
-use vrrp_packet::VrrpPacket;
-use crate::{pkt_generators, pkt_handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}, router::VirtualRouter};
+use crate::{
+    pkt::generators,
+    pkt::handlers::{ handle_incoming_arp_pkt, handle_incoming_vrrp_pkt }, 
+    router::VirtualRouter
+};
 
 
-
-pub fn send_advertisement<'a>(mut vrouter: VirtualRouter)  
+pub fn send_advertisement<'a>(vrouter: VirtualRouter)  
 {
-    let interface_names_match = |iface: &NetworkInterface| iface.name == vrouter.network_interface;
-    let interfaces = datalink::linux::interfaces();
-    let interface = interfaces
-        .into_iter()
-        .filter(interface_names_match)
-        .next()
-        .unwrap();
+    let interface = crate::get_interface(&vrouter.name);
     
     if interface.ips.len() == 0 {
         log::error!("Interface {} does not have any valid IP addresses", interface.name);
         panic!("Interface {} does not have any valid IP addresses", interface.name);
     }
 
-    let mutable_pkt_generator = pkt_generators::MutablePktGenerator::new(vrouter.clone(), interface.clone());
+    let mutable_pkt_generator = generators::MutablePktGenerator::new(vrouter.clone(), interface.clone());
     
     
     //   ________________________________________________
@@ -56,48 +47,35 @@ pub fn send_advertisement<'a>(mut vrouter: VirtualRouter)
     let mut ether_packet = mutable_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
     ether_packet.set_payload(ip_packet.packet());
     
-    let (mut _sender, mut receiver) = create_datalink_channel(&interface);
+    let (mut _sender, mut receiver) = crate::create_datalink_channel(&interface);
     
-    // listen for any incoming requests
+    // thread to listen for any incoming requests
     let receiver_thread = thread::spawn( move || {
         loop {
             let buf = receiver.next().unwrap();
             let incoming_eth_pkt = EthernetPacket::new(&buf).unwrap();
             
             match incoming_eth_pkt.get_ethertype() {
+
                 EtherTypes::Ipv4 => {
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                        let incoming_vrrp_pkt = VrrpPacket::new(incoming_ip_pkt.payload()).unwrap();
-                        handle_incoming_vrrp_pkt(&incoming_vrrp_pkt, &vrouter);
+                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, &vrouter);
                     }
                 }
 
                 EtherTypes::Arp => {
-                    let incoming_arp_pkt = ArpPacket::new(incoming_eth_pkt.payload()).unwrap();
-                    handle_incoming_arp_pkt(&incoming_arp_pkt, &vrouter);
+                    handle_incoming_arp_pkt( &incoming_eth_pkt, &vrouter);
                 }
 
                 _ => continue
             }
-
         }
-        
     });
 
     let _ = receiver_thread.join();
 
 }
-
-
-fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
-    match pnet::datalink::channel(interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => return (tx, rx),
-        Ok(_) => panic!("Unknown channel type"),
-        Err(e) => panic!("Error happened: {}", e)
-    }
-}
-
 
 pub mod checksum 
 {
@@ -116,7 +94,6 @@ pub mod checksum
     /// returns all-ones if carried checksum is valid
     pub fn _rfc1071(mut data: &[u8]) -> u16 
     {
-        
         let mut acc = 0;
 
         // for each 32 bytes chunk
