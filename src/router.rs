@@ -4,7 +4,7 @@ use pnet::util::MacAddr;
 
 use crate::system::VirtualRouterSystem;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VirtualRouter {
     pub name: String,
     pub vrid: u8,

@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct VirtualRouterSystem {
     pub timers: Timers,
     pub state: States

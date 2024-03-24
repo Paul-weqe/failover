@@ -1,10 +1,10 @@
-mod defaults;
+mod pkt_generators;
+mod pkt_handlers;
 mod config;
 mod router;
 mod converter;
 mod network;
 mod system;
-
 
 use std::{error::Error, fs::File, io::BufReader, path::Path};
 use simple_logger::SimpleLogger;
