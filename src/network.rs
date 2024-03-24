@@ -4,13 +4,14 @@ use pnet::packet::{
     ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
 use crate::{
-    pkt::generators,
-    pkt::handlers::{ handle_incoming_arp_pkt, handle_incoming_vrrp_pkt }, 
-    router::VirtualRouter
+    pkt::{generators, handlers::{ handle_incoming_arp_pkt, handle_incoming_vrrp_pkt }},
+    router::VirtualRouter, state_machine::States
 };
 
 
-pub fn send_advertisement<'a>(vrouter: VirtualRouter)  
+/// initiates the network functions across the board. 
+/// from interfaces, channels, packet handling etc...
+pub fn init_network<'a>(mut vrouter: VirtualRouter)  
 {
     let interface = crate::get_interface(&vrouter.name);
     
@@ -20,47 +21,79 @@ pub fn send_advertisement<'a>(vrouter: VirtualRouter)
     }
 
     let mutable_pkt_generator = generators::MutablePktGenerator::new(vrouter.clone(), interface.clone());
+    let (mut sender, mut receiver) = crate::create_datalink_channel(&interface);
     
-    
-    //   ________________________________________________
-    //  |                _______________________________|
-    //  |               |                               |
-    //  |               |            ______________     |
-    //  |  ETH HEADER   | IP HEADER |  VRRP PACKET |    |
-    //  |               |           |______________|    |  
-    //  |               |_______________________________|
-    //  |_______________________________________________|
 
-    // VRRP pakcet
-    let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-    let mut vrrp_packet = mutable_pkt_generator.gen_vrrp_header(&mut vrrp_buff);
-    vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
-    
-    // IP packet
-    let ip_len = vrrp_packet.packet().len() + 20;
-    let mut ip_buff: Vec<u8> = vec![0; ip_len];
-    let mut ip_packet = mutable_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
-    ip_packet.set_payload(vrrp_packet.packet());
+    if vrouter.fsm.state == States::INIT {
+        if vrouter.priority == 255 {
+            //   ________________________________________________
+            //  |                _______________________________|
+            //  |               |                               |
+            //  |               |            ______________     |
+            //  |  ETH HEADER   | IP HEADER |  VRRP PACKET |    |
+            //  |               |           |______________|    |  
+            //  |               |_______________________________|
+            //  |_______________________________________________|
 
-    // Ethernet packet
-    let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
-    let mut ether_packet = mutable_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
-    ether_packet.set_payload(ip_packet.packet());
-    
-    let (mut _sender, mut receiver) = crate::create_datalink_channel(&interface);
-    
+            // VRRP pakcet
+            let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
+            let mut vrrp_packet = mutable_pkt_generator.gen_vrrp_header(&mut vrrp_buff);
+            vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
+            
+            // IP packet
+            let ip_len = vrrp_packet.packet().len() + 20;
+            let mut ip_buff: Vec<u8> = vec![0; ip_len];
+            let mut ip_packet = mutable_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
+            ip_packet.set_payload(vrrp_packet.packet());
+
+            // Ethernet packet
+            let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
+            let mut ether_packet = mutable_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
+            ether_packet.set_payload(ip_packet.packet());
+
+            sender
+                .send_to(ether_packet.packet(), None)
+                .unwrap()
+                .unwrap();
+
+
+            for ip in &vrouter.ip_addresses {
+                let mut e_buff = [0u8; 42];
+                let mut a_buff = [0u8; 28];
+                let (mut grat_eth, grat_arp) = mutable_pkt_generator.gen_gratuitous_arp_packet(
+                    &mut e_buff, &mut a_buff, ip.addr()
+                );
+                grat_eth.set_payload(grat_arp.packet());
+                sender
+                    .send_to(grat_eth.packet(), None)
+                    .unwrap()
+                    .unwrap();
+            }
+            vrouter.fsm.set_advert_timer(vrouter.advert_interval as f32);
+            vrouter.fsm.state = States::MASTER;
+            log::info!("({}) transitioned to MASTER", vrouter.name);
+        }
+
+        else {
+            vrouter.fsm.set_master_down_time(vrouter.master_down_interval);
+            vrouter.fsm.state = States::BACKUP;
+            log::info!("({}) transitioned to BACKUP", vrouter.name);
+        }
+        
+    }
+
     // thread to listen for any incoming requests
     let receiver_thread = thread::spawn( move || {
+
         loop {
             let buf = receiver.next().unwrap();
             let incoming_eth_pkt = EthernetPacket::new(&buf).unwrap();
             
             match incoming_eth_pkt.get_ethertype() {
-
                 EtherTypes::Ipv4 => {
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, &vrouter);
+                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, &mut vrouter);
                     }
                 }
 

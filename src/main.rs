@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>>{
     SimpleLogger::new().with_colors(true).init().unwrap();
     let config = read_config_from_json_file("./vrrp-config.json")?;
     let vr = converter::config_to_vr(&config);
-    network::send_advertisement(vr);
+    network::init_network(vr);
 
     Ok(())
 }

@@ -80,7 +80,9 @@ impl MutablePktGenerator {
         ether_pkt
     }
 
-    pub fn _gen_gratuitous_arp_packet<'a>(&self, eth_buffer: &'a mut [u8], arp_buffer: &'a mut [u8]) -> (MutableEthernetPacket<'a>, MutableArpPacket<'a>) 
+    pub fn gen_gratuitous_arp_packet<'a>(
+        &self, eth_buffer: &'a mut [u8], arp_buffer: &'a mut [u8], ip: Ipv4Addr
+    ) -> (MutableEthernetPacket<'a>, MutableArpPacket<'a>) 
     {
         let mut eth_arp_packet = MutableEthernetPacket::new(&mut eth_buffer[..]).unwrap();
         eth_arp_packet.set_destination(MacAddr::broadcast());
@@ -94,9 +96,9 @@ impl MutablePktGenerator {
         arp_packet.set_proto_addr_len(4);
         arp_packet.set_operation(ArpOperations::Request);
         arp_packet.set_sender_hw_addr(self.interface.mac.unwrap());
-        arp_packet.set_sender_proto_addr(self.vrouter.clone().ip_addresses[0].addr());
+        arp_packet.set_sender_proto_addr(ip);
         arp_packet.set_target_hw_addr(MacAddr::broadcast());
-        arp_packet.set_target_proto_addr(self.vrouter.ip_addresses[0].addr());
+        arp_packet.set_target_proto_addr(ip);
         (eth_arp_packet, arp_packet)
 
     }

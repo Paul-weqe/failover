@@ -1,6 +1,6 @@
 use ipnet::Ipv4Net;
 
-use crate::{config, router::VirtualRouter, state_machine::VirtualRouterSystem};
+use crate::{config, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use std::{f32, str::FromStr};
 
 
@@ -34,7 +34,7 @@ pub fn config_to_vr(conf: &config::VRConfig) -> VirtualRouter {
         master_down_interval: master_down_interval,
         preempt_mode: conf.preempt_mode,
         network_interface: conf.network_interface.clone(),
-        fsm: VirtualRouterSystem::default()
+        fsm: VirtualRouterMachine::default()
     };
     log::info!("({}) Set up Router", vr.name);
     log::info!("({}) Entered {:?} state", vr.name, vr.fsm.state);

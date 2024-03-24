@@ -2,7 +2,7 @@
 use ipnet::Ipv4Net;
 use pnet::util::MacAddr;
 
-use crate::state_machine::VirtualRouterSystem;
+use crate::state_machine::VirtualRouterMachine;
 
 #[derive(Debug, Clone)]
 pub struct VirtualRouter {
@@ -15,7 +15,7 @@ pub struct VirtualRouter {
     pub master_down_interval: f32,
     pub preempt_mode: bool,
     pub network_interface: String,
-    pub fsm: VirtualRouterSystem
+    pub fsm: VirtualRouterMachine
 }
 
 impl VirtualRouter {

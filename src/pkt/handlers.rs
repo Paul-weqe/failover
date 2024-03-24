@@ -1,15 +1,14 @@
+use crate::{network, pkt::generators};
 use pnet::packet::{
-    arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
-    ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket },
-    Packet
+    arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, ipv4::Ipv4Packet, Packet
 };
-use crate::{ router::VirtualRouter, state_machine::States };
-
+use vrrp_packet::VrrpPacket;
+use crate::{ router::VirtualRouter, state_machine::States};
 
 
 // pub fn handle_incoming_arp_pkt(packet: &ArpPacket, vrouter: &VirtualRouter) {
 pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRouter) {
-    let interface = crate::get_interface(&vrouter.name);
+    let interface = crate::get_interface(&vrouter.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
 
     match vrouter.fsm.state {
@@ -66,4 +65,71 @@ pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRou
     }
 }
 
-pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRouter) {}
+pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut VirtualRouter) {
+    let interface = crate::get_interface(&vrouter.network_interface);
+    let vrrp_packet = VrrpPacket::new(eth_packet.payload()).unwrap();
+
+    match vrouter.fsm.state {
+        States::BACKUP => {
+            if vrrp_packet.get_priority() == 0 {
+                vrouter.fsm.set_master_down_time(vrouter.skew_time);
+            }
+            else {
+                if !vrouter.preempt_mode || vrrp_packet.get_priority() >= vrouter.priority {
+                    vrouter.fsm.set_master_down_time(vrouter.master_down_interval);
+                }
+                else {
+                    return
+                }
+            }
+        }
+        
+        States::MASTER => {
+            let incoming_ip_pkt = Ipv4Packet::new(eth_packet.payload()).unwrap(); 
+            let adv_priority_gt_local_priority = vrrp_packet.get_priority() > vrouter.priority;
+            let adv_priority_eq_local_priority = vrrp_packet.get_priority() == vrouter.priority;
+            let send_ip_gt_local_ip = incoming_ip_pkt.get_source() > incoming_ip_pkt.get_destination();
+
+            // If an ADVERTISEMENT is received, then
+            if vrrp_packet.get_priority() == 0 {
+
+                // send ADVERTISEMENT
+                let mut_pkt_generator = generators::MutablePktGenerator::new(
+                    vrouter.clone(), interface.clone()
+                );
+                let (mut sender, _) = crate::create_datalink_channel(&interface);
+
+                let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
+                let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff);
+                outgoing_vrrp_packet.set_checksum(network::checksum::one_complement_sum(outgoing_vrrp_packet.packet(), Some(6)));
+
+                let ip_len = vrrp_packet.packet().len() + 20;
+                let mut ip_buff: Vec<u8> = vec![0; ip_len];
+                let mut ip_packet = mut_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
+                ip_packet.set_payload(vrrp_packet.packet());
+
+                let mut eth_buff: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
+                let mut eth_packet = mut_pkt_generator.gen_vrrp_eth_packet(&mut eth_buff);
+                eth_packet.set_payload(ip_packet.packet());
+
+                sender
+                    .send_to(eth_packet.packet(), None)
+                    .unwrap()
+                    .unwrap();
+                vrouter.fsm.set_advert_timer(vrouter.advert_interval as f32);
+            }
+            
+            else if adv_priority_gt_local_priority || ( adv_priority_eq_local_priority && send_ip_gt_local_ip) {
+                vrouter.fsm.set_master_down_time(vrouter.master_down_interval as f32);
+                vrouter.fsm.state = States::BACKUP;
+            }
+
+            else {
+                return
+            }
+
+        }
+        _ => {}
+    }
+
+}
