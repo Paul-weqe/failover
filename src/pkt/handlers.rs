@@ -3,12 +3,15 @@ use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, ipv4::Ipv4Packet, Packet
 };
 use vrrp_packet::VrrpPacket;
-use crate::{ router::VirtualRouter, state_machine::States};
-
+use crate::{ 
+    router::VirtualRouter, 
+    state_machine::States,
+    base_functions::{create_datalink_channel, get_interface}
+};
 
 // pub fn handle_incoming_arp_pkt(packet: &ArpPacket, vrouter: &VirtualRouter) {
 pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRouter) {
-    let interface = crate::get_interface(&vrouter.network_interface);
+    let interface = get_interface(&vrouter.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
 
     match vrouter.fsm.state {
@@ -34,7 +37,7 @@ pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRou
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
-                    let (mut sender, _) = crate::create_datalink_channel(&interface);
+                    let (mut sender, _) = create_datalink_channel(&interface);
 
                     // respond to arp request
                     let mut ethernet_buffer = [0u8; 42];
@@ -66,7 +69,7 @@ pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRou
 }
 
 pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut VirtualRouter) {
-    let interface = crate::get_interface(&vrouter.network_interface);
+    let interface = get_interface(&vrouter.network_interface);
     let vrrp_packet = VrrpPacket::new(eth_packet.payload()).unwrap();
 
     match vrouter.fsm.state {
@@ -97,7 +100,7 @@ pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut Virtu
                 let mut_pkt_generator = generators::MutablePktGenerator::new(
                     vrouter.clone(), interface.clone()
                 );
-                let (mut sender, _) = crate::create_datalink_channel(&interface);
+                let (mut sender, _) = create_datalink_channel(&interface);
 
                 let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
                 let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff);

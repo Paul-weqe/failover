@@ -1,15 +1,15 @@
 use ipnet::Ipv4Net;
 
-use crate::{config, router::VirtualRouter, state_machine::VirtualRouterMachine};
+use crate::{router::VirtualRouter, state_machine::VirtualRouterMachine};
 use std::{f32, str::FromStr};
 
 
 /// Converts the `crate::config::VrConfig` to `crate::router::VirtualRouter`
-pub fn config_to_vr(conf: &config::VRConfig) -> VirtualRouter {
+pub fn config_to_vr(conf: &crate::base_functions::FileConfig) -> VirtualRouter {
 
     // SKEW TIME = (256 * priority) / 256
     let skew_time: f32 = (256 as f32 - conf.priority as f32) / 256 as f32;
-
+    
     // MASTER DOWN INTERVAL = (3 * ADVERTISEMENT INTERVAL ) + SKEW TIME 
     let master_down_interval: f32 = (3 as f32 * conf.advert_interval as f32) + skew_time as f32;
     

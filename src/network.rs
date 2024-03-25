@@ -5,7 +5,8 @@ use pnet::packet::{
 };
 use crate::{
     pkt::{generators, handlers::{ handle_incoming_arp_pkt, handle_incoming_vrrp_pkt }},
-    router::VirtualRouter, state_machine::States
+    router::VirtualRouter, state_machine::States,
+    base_functions::{create_datalink_channel, get_interface}
 };
 
 
@@ -13,7 +14,7 @@ use crate::{
 /// from interfaces, channels, packet handling etc...
 pub fn init_network<'a>(mut vrouter: VirtualRouter)  
 {
-    let interface = crate::get_interface(&vrouter.name);
+    let interface = get_interface(&vrouter.name);
     
     if interface.ips.len() == 0 {
         log::error!("Interface {} does not have any valid IP addresses", interface.name);
@@ -21,7 +22,7 @@ pub fn init_network<'a>(mut vrouter: VirtualRouter)
     }
 
     let mutable_pkt_generator = generators::MutablePktGenerator::new(vrouter.clone(), interface.clone());
-    let (mut sender, mut receiver) = crate::create_datalink_channel(&interface);
+    let (mut sender, mut receiver) = create_datalink_channel(&interface);
     
 
     if vrouter.fsm.state == States::INIT {
