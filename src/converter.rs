@@ -36,7 +36,7 @@ pub fn config_to_vr(conf: &crate::base_functions::FileConfig) -> VirtualRouter {
         network_interface: conf.network_interface.clone(),
         fsm: VirtualRouterMachine::default()
     };
-    log::info!("({}) Set up Router", vr.name);
+    log::info!("({}) Setting up Router", vr.name);
     log::info!("({}) Entered {:?} state", vr.name, vr.fsm.state);
     vr
 

@@ -1,10 +1,11 @@
-use std::thread;
+use std::sync::Arc;
 use pnet::packet::{
     ethernet::{ EtherTypes, EthernetPacket }, 
     ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
+use tokio::sync::Mutex;
 use crate::{
-    pkt::{generators, handlers::{ handle_incoming_arp_pkt, handle_incoming_vrrp_pkt }},
+    pkt::{generators, handlers::{handle_incoming_vrrp_pkt, handle_incoming_arp_pkt}},
     router::VirtualRouter, state_machine::States,
     base_functions::{create_datalink_channel, get_interface}
 };
@@ -12,21 +13,27 @@ use crate::{
 
 /// initiates the network functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub fn init_network<'a>(mut vrouter: VirtualRouter)  
+pub async fn init_network<'a>(vrouter: VirtualRouter)  
 {
-    let interface = get_interface(&vrouter.name);
-    
+
+    let interface = get_interface(&vrouter.network_interface);
+    let vrouter_mutex = Arc::new(Mutex::new(vrouter));
+    let net_vrouter_mutex = Arc::clone(&vrouter_mutex);
+    let mut vr = vrouter_mutex.lock().await;
+
     if interface.ips.len() == 0 {
         log::error!("Interface {} does not have any valid IP addresses", interface.name);
         panic!("Interface {} does not have any valid IP addresses", interface.name);
     }
 
-    let mutable_pkt_generator = generators::MutablePktGenerator::new(vrouter.clone(), interface.clone());
-    let (mut sender, mut receiver) = create_datalink_channel(&interface);
-    
+    let mutable_pkt_generator = generators::MutablePktGenerator::new( interface.clone() );
 
-    if vrouter.fsm.state == States::INIT {
-        if vrouter.priority == 255 {
+    let (mut sender, _receiver) = create_datalink_channel(&interface);
+
+    if vr.fsm.state == States::INIT {
+        if vr.priority == 255 {
+
+            
             //   ________________________________________________
             //  |                _______________________________|
             //  |               |                               |
@@ -37,8 +44,8 @@ pub fn init_network<'a>(mut vrouter: VirtualRouter)
             //  |_______________________________________________|
 
             // VRRP pakcet
-            let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-            let mut vrrp_packet = mutable_pkt_generator.gen_vrrp_header(&mut vrrp_buff);
+            let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vr.ip_addresses.len())];
+            let mut vrrp_packet = mutable_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vr).await;
             vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
             
             // IP packet
@@ -47,18 +54,17 @@ pub fn init_network<'a>(mut vrouter: VirtualRouter)
             let mut ip_packet = mutable_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
             ip_packet.set_payload(vrrp_packet.packet());
 
+
             // Ethernet packet
             let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
             let mut ether_packet = mutable_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
-            ether_packet.set_payload(ip_packet.packet());
-
+            ether_packet.set_payload(ip_packet.packet());            
             sender
                 .send_to(ether_packet.packet(), None)
                 .unwrap()
                 .unwrap();
 
-
-            for ip in &vrouter.ip_addresses {
+            for ip in &vr.ip_addresses {
                 let mut e_buff = [0u8; 42];
                 let mut a_buff = [0u8; 28];
                 let (mut grat_eth, grat_arp) = mutable_pkt_generator.gen_gratuitous_arp_packet(
@@ -70,44 +76,50 @@ pub fn init_network<'a>(mut vrouter: VirtualRouter)
                     .unwrap()
                     .unwrap();
             }
-            vrouter.fsm.set_advert_timer(vrouter.advert_interval as f32);
-            vrouter.fsm.state = States::MASTER;
-            log::info!("({}) transitioned to MASTER", vrouter.name);
+
+            let advert_time = vr.advert_interval as f32;
+            vr.fsm.set_advert_timer(advert_time);
+            vr.fsm.state = States::MASTER;
+            log::info!("({}) transitioned to MASTER", vr.name);
         }
 
         else {
-            vrouter.fsm.set_master_down_time(vrouter.master_down_interval);
-            vrouter.fsm.state = States::BACKUP;
-            log::info!("({}) transitioned to BACKUP", vrouter.name);
+            let m_down_interval = vr.master_down_interval;
+            vr.fsm.set_master_down_time(m_down_interval);
+            vr.fsm.state = States::BACKUP;
+            log::info!("({}) transitioned to BACKUP", vr.name);
         }
-        
     }
 
-    // thread to listen for any incoming requests
-    let receiver_thread = thread::spawn( move || {
+    
 
+    // thread to listen for any incoming network requests
+    // subprocess listens for any incoming network requests
+    let network_receiver_process = tokio::spawn( async move {
+        let (mut _tx, mut rx) = create_datalink_channel(&interface);
+        
         loop {
-            let buf = receiver.next().unwrap();
+            let buf = rx.next().unwrap();
             let incoming_eth_pkt = EthernetPacket::new(&buf).unwrap();
-            
             match incoming_eth_pkt.get_ethertype() {
+                
                 EtherTypes::Ipv4 => {
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, &mut vrouter);
+                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&net_vrouter_mutex)).await;
                     }
                 }
-
+                
                 EtherTypes::Arp => {
-                    handle_incoming_arp_pkt( &incoming_eth_pkt, &vrouter);
+                    handle_incoming_arp_pkt( &incoming_eth_pkt, Arc::clone(&net_vrouter_mutex)).await;
                 }
 
-                _ => continue
+                _ => {}
             }
         }
-    });
 
-    let _ = receiver_thread.join();
+    });
+    let _ = network_receiver_process.await;
 
 }
 

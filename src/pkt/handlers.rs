@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::{network, pkt::generators};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, ipv4::Ipv4Packet, Packet
@@ -10,16 +12,18 @@ use crate::{
 };
 
 // pub fn handle_incoming_arp_pkt(packet: &ArpPacket, vrouter: &VirtualRouter) {
-pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRouter) {
-    let interface = get_interface(&vrouter.network_interface);
+pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
+
+    let mut_router = vrouter.lock().await;
+    let interface = get_interface(&mut_router.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
 
-    match vrouter.fsm.state {
+    match mut_router.fsm.state {
         States::INIT => {}
         States::BACKUP => {
             // MUST NOT respond to ARP requests for the IP address(s) associated 
             // with the virtual router.
-            for ip in &vrouter.ip_addresses {
+            for ip in &mut_router.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
                     return 
                 }
@@ -35,7 +39,7 @@ pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRou
         States::MASTER => {
             // MUST respond to ARP requests for the IP address(es) associated
             // with the virtual router.
-            for ip in &vrouter.ip_addresses {
+            for ip in &mut_router.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
                     let (mut sender, _) = create_datalink_channel(&interface);
 
@@ -68,23 +72,31 @@ pub fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket, vrouter: &VirtualRou
     }
 }
 
-pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut VirtualRouter) {
+// pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: Arc<Mutex<VirtualRouter>>)
+pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) 
+{
+    let mut vrouter = vrouter_mutex.lock().await;
+
     let interface = get_interface(&vrouter.network_interface);
     let vrrp_packet = VrrpPacket::new(eth_packet.payload()).unwrap();
 
     match vrouter.fsm.state {
         States::BACKUP => {
+            
             if vrrp_packet.get_priority() == 0 {
-                vrouter.fsm.set_master_down_time(vrouter.skew_time);
+                let skew_time = vrouter.skew_time;
+                vrouter.fsm.set_master_down_time(skew_time);
             }
             else {
                 if !vrouter.preempt_mode || vrrp_packet.get_priority() >= vrouter.priority {
-                    vrouter.fsm.set_master_down_time(vrouter.master_down_interval);
+                    let m_down_interval = vrouter.master_down_interval;
+                    vrouter.fsm.set_master_down_time(m_down_interval);
                 }
                 else {
                     return
                 }
             }
+
         }
         
         States::MASTER => {
@@ -97,13 +109,11 @@ pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut Virtu
             if vrrp_packet.get_priority() == 0 {
 
                 // send ADVERTISEMENT
-                let mut_pkt_generator = generators::MutablePktGenerator::new(
-                    vrouter.clone(), interface.clone()
-                );
+                let mut_pkt_generator = generators::MutablePktGenerator::new(interface.clone());
                 let (mut sender, _) = create_datalink_channel(&interface);
 
                 let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff);
+                let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
                 outgoing_vrrp_packet.set_checksum(network::checksum::one_complement_sum(outgoing_vrrp_packet.packet(), Some(6)));
 
                 let ip_len = vrrp_packet.packet().len() + 20;
@@ -119,11 +129,13 @@ pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: &mut Virtu
                     .send_to(eth_packet.packet(), None)
                     .unwrap()
                     .unwrap();
-                vrouter.fsm.set_advert_timer(vrouter.advert_interval as f32);
+                let advert_interval = vrouter.advert_interval as f32;
+                vrouter.fsm.set_advert_timer(advert_interval);
             }
             
             else if adv_priority_gt_local_priority || ( adv_priority_eq_local_priority && send_ip_gt_local_ip) {
-                vrouter.fsm.set_master_down_time(vrouter.master_down_interval as f32);
+                let m_down_interval = vrouter.master_down_interval as f32;
+                vrouter.fsm.set_master_down_time(m_down_interval);
                 vrouter.fsm.state = States::BACKUP;
             }
 

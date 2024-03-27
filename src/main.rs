@@ -8,15 +8,16 @@ use std::{error::Error, fs::File, io::BufReader, path::Path};
 use simple_logger::SimpleLogger;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>>{
+async fn main(){
     
     SimpleLogger::new().with_colors(true).init().unwrap();
-    let config = read_config_from_json_file("./vrrp-config.json")?;
+    let config = read_config_from_json_file("./vrrp-config.json").unwrap();
     let vr = converter::config_to_vr(&config);
-    network::init_network(vr);
-
-    Ok(())
+    let init_network_ft = network::init_network(vr);
+    init_network_ft.await;
 }
+
+
 
 
 fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<base_functions::FileConfig, Box<dyn Error>> {

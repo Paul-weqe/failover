@@ -1,27 +1,33 @@
 use std::{net::Ipv4Addr, str::FromStr};
-
-use pnet::{datalink::NetworkInterface, packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, ethernet::{EtherTypes, MutableEthernetPacket}, ip::IpNextHeaderProtocols, ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}}, util::MacAddr};
+use tokio::sync::MutexGuard;
+use pnet::{
+    datalink::NetworkInterface, 
+    packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, 
+    ethernet::{EtherTypes, MutableEthernetPacket},
+    ip::IpNextHeaderProtocols, 
+    ipv4::{checksum, Ipv4Flags, MutableIpv4Packet}},
+    util::MacAddr
+};
 use vrrp_packet::MutableVrrpPacket;
 use crate::router::VirtualRouter;
+
 pub struct MutablePktGenerator {
-    vrouter: VirtualRouter, 
     interface: NetworkInterface
 }
 
-impl MutablePktGenerator {
-    
-    pub fn new<'a>(vrouter: VirtualRouter, interface: NetworkInterface) -> Self 
+impl MutablePktGenerator 
+{
+    pub fn new<'a>(interface: NetworkInterface) -> Self 
     {
-        MutablePktGenerator { 
-            vrouter, 
+        MutablePktGenerator {
             interface 
         }
     }
 
-    pub fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8]) -> MutableVrrpPacket<'a>
+    pub async fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8], vrouter: &MutexGuard<'_, VirtualRouter>) -> MutableVrrpPacket<'a>
     {
         let mut addresses: Vec<u8> = Vec::new();
-        for addr in &self.vrouter.ip_addresses {
+        for addr in &vrouter.ip_addresses {
             for octet in addr.addr().octets() {
                 addresses.push(octet);
             }
@@ -29,10 +35,10 @@ impl MutablePktGenerator {
         let mut vrrp_pkt = MutableVrrpPacket::new(buffer).unwrap();
         vrrp_pkt.set_version(2);
         vrrp_pkt.set_header_type(1);
-        vrrp_pkt.set_advert_int(self.vrouter.advert_interval);
-        vrrp_pkt.set_vrid(self.vrouter.vrid);
-        vrrp_pkt.set_priority(self.vrouter.priority);
-        vrrp_pkt.set_count_ip(self.vrouter.ip_addresses.len() as u8);
+        vrrp_pkt.set_advert_int(vrouter.advert_interval);
+        vrrp_pkt.set_vrid(vrouter.vrid);
+        vrrp_pkt.set_priority(vrouter.priority);
+        vrrp_pkt.set_count_ip(vrouter.ip_addresses.len() as u8);
         vrrp_pkt.set_checksum(0);
         vrrp_pkt.set_auth_type(0);
         vrrp_pkt.set_auth_data(0);
@@ -68,6 +74,7 @@ impl MutablePktGenerator {
         ip_pkt.set_source(Ipv4Addr::from_str(&ip.to_string()).unwrap());
         ip_pkt.set_destination(Ipv4Addr::new(224, 0, 0, 18));
         ip_pkt.set_checksum(checksum(&ip_pkt.to_immutable()));
+        
         ip_pkt
     }
 
@@ -100,7 +107,7 @@ impl MutablePktGenerator {
         arp_packet.set_target_hw_addr(MacAddr::broadcast());
         arp_packet.set_target_proto_addr(ip);
         (eth_arp_packet, arp_packet)
-
+        
     }
 
 }

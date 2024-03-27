@@ -67,7 +67,7 @@ impl Default for TimerType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
     NoEvent,
     Startup, 
