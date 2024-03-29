@@ -11,6 +11,7 @@ use pnet::{
 use vrrp_packet::MutableVrrpPacket;
 use crate::router::VirtualRouter;
 
+#[derive(Clone)]
 pub struct MutablePktGenerator {
     interface: NetworkInterface
 }

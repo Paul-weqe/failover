@@ -85,12 +85,12 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
             
             if vrrp_packet.get_priority() == 0 {
                 let skew_time = vrouter.skew_time;
-                vrouter.fsm.set_master_down_time(skew_time);
+                vrouter.fsm.set_master_down_timer(skew_time);
             }
             else {
                 if !vrouter.preempt_mode || vrrp_packet.get_priority() >= vrouter.priority {
                     let m_down_interval = vrouter.master_down_interval;
-                    vrouter.fsm.set_master_down_time(m_down_interval);
+                    vrouter.fsm.set_master_down_timer(m_down_interval);
                 }
                 else {
                     return
@@ -135,7 +135,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
             
             else if adv_priority_gt_local_priority || ( adv_priority_eq_local_priority && send_ip_gt_local_ip) {
                 let m_down_interval = vrouter.master_down_interval as f32;
-                vrouter.fsm.set_master_down_time(m_down_interval);
+                vrouter.fsm.set_master_down_timer(m_down_interval);
                 vrouter.fsm.state = States::BACKUP;
             }
 

@@ -18,12 +18,21 @@ impl Default for VirtualRouterMachine {
 
 impl VirtualRouterMachine {
     pub fn set_advert_timer(&mut self, duration: f32) {
-        self.timer = Timer { t_type: TimerType::AdvertTimer, duration: duration };
+        self.timer = Timer { t_type: TimerType::AdvertTimer, remaining_time: duration };
     }
 
-    pub fn set_master_down_time(&mut self, duration: f32) {
-        self.timer = Timer { t_type: TimerType::MasterDownTimer, duration: duration };
+    pub fn set_master_down_timer(&mut self, duration: f32) {
+        self.timer =  Timer { t_type: TimerType::MasterDownTimer, remaining_time: duration };
     }
+
+    pub fn disable_timer(&mut self) {
+        self.timer = Timer { t_type: TimerType::NoTimer, remaining_time: f32::default() };
+    }
+
+    pub fn reduce_timer(&mut self) {
+        self.timer.remaining_time = if self.timer.remaining_time == 0.0 { 0.0 } else { self.timer.remaining_time - 1.0 };
+    }
+
 }
 
 
@@ -40,30 +49,31 @@ impl Default for States {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Timer {
-    t_type: TimerType,
-    duration: f32   
+    pub t_type: TimerType,
+    pub remaining_time: f32   
 }
 
 impl Default for Timer {
     fn default() -> Self {
         Timer {
             t_type: TimerType::default(),
-            duration: f32::default()
+            remaining_time: f32::default()
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TimerType {
     MasterDownTimer, 
-    AdvertTimer
+    AdvertTimer,
+    NoTimer
 }
 
 impl Default for TimerType {
     fn default() -> Self {
-        Self::MasterDownTimer
+        Self::NoTimer
     }
 }
 
@@ -77,6 +87,6 @@ pub enum Event {
 
 impl Default for Event {
     fn default() -> Self {
-        Event::NoEvent
+        Event::Startup
     }
 }

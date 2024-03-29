@@ -3,7 +3,7 @@
     "vrid": 51,
     "network_interface": "wlo1",
     "ip_addresses": [ 
-        "192.168.8.50/24"
+        "192.168.100.50/24"
     ],
     "priority": 255,
     "advert_interval": 1,
