@@ -5,7 +5,9 @@ use pnet::packet::{
 };
 use tokio::sync::Mutex;
 use crate::{
-    base_functions::{create_datalink_channel, get_interface}, pkt::{generators, handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, router::VirtualRouter, state_machine::{Event, States}
+    base_functions::{create_datalink_channel, get_interface}, 
+    pkt::{generators, handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, 
+    router::VirtualRouter, state_machine::{Event, States}
 };
 
 
@@ -17,6 +19,7 @@ pub async fn init_network(vrouter: VirtualRouter)
     let interface = get_interface(&vrouter.network_interface);
     let vrouter_mutex = Arc::new(Mutex::new(vrouter));
 
+    
     // mutexes to be used in the Network, Event and Timer listeners 
     let net_vrouter_mutex = Arc::clone(&vrouter_mutex);
     let event_vrouter_mutex = Arc::clone(&vrouter_mutex);
@@ -72,10 +75,9 @@ pub async fn init_network(vrouter: VirtualRouter)
 
     let timers_counter_process = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        let mut timer_vrouter = timer_vrouter_mutex.lock().await;
-        log::info!("TIMER STARTED!!");
         
         loop {
+            let mut timer_vrouter = timer_vrouter_mutex.lock().await;
             interval.tick().await;
             let timer = timer_vrouter.fsm.timer;
 
@@ -121,13 +123,12 @@ pub async fn init_network(vrouter: VirtualRouter)
 
     // listens to any event as it comes in
     let event_listener_process = tokio::spawn(async move {
-        let mut event_vrouter = event_vrouter_mutex.lock().await;
         
-        log::info!("EVENT STARTED!!");
         loop {
+
+            let mut event_vrouter = event_vrouter_mutex.lock().await;
             match &event_vrouter.fsm.event {
                 Event::Startup => {
-                    log::info!("({}) Startup Event", &event_vrouter.name);
                     if event_vrouter.fsm.state == States::INIT {
                         if event_vrouter.priority == 255 {
 
@@ -189,7 +190,6 @@ pub async fn init_network(vrouter: VirtualRouter)
                             log::info!("({}) transitioned to BACKUP", event_vrouter.name);
                         }
                     }
-                    event_vrouter.fsm.event = Event::NoEvent;
                 }
 
                 Event::Shutdown => {
@@ -287,9 +287,8 @@ pub async fn init_network(vrouter: VirtualRouter)
 
     let _ = tokio::join!(
         network_receiver_process, 
-        timers_counter_process,
-        event_listener_process
-        
+        event_listener_process,
+        timers_counter_process
     );
 
 }

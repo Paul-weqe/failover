@@ -3,9 +3,9 @@
     "vrid": 51,
     "network_interface": "wlo1",
     "ip_addresses": [ 
-        "192.168.100.50/24"
+        "192.168.8.100/24"
     ],
-    "priority": 255,
+    "priority": 100,
     "advert_interval": 1,
     "preempt_mode": true
 }
