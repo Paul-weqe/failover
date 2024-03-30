@@ -2,7 +2,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::{network, pkt::generators};
 use pnet::packet::{
-    arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, ipv4::Ipv4Packet, Packet
+    arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
+    ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
+    ipv4::Ipv4Packet, Packet
 };
 use vrrp_packet::VrrpPacket;
 use crate::{ 
@@ -76,27 +78,32 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
 pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) 
 {
     let mut vrouter = vrouter_mutex.lock().await;
-
     let interface = get_interface(&vrouter.network_interface);
-    let vrrp_packet = VrrpPacket::new(eth_packet.payload()).unwrap();
-
+    let ip_packet = Ipv4Packet::new(eth_packet.payload()).unwrap();
+    let vrrp_packet = VrrpPacket::new(ip_packet.payload()).unwrap();
+    
     match vrouter.fsm.state {
+
         States::BACKUP => {
-            
+            println!("BACKUP");
             if vrrp_packet.get_priority() == 0 {
                 let skew_time = vrouter.skew_time;
-                vrouter.fsm.set_master_down_time(skew_time);
+                vrouter.fsm.set_master_down_timer(skew_time);
             }
+            else if !vrouter.preempt_mode || vrrp_packet.get_priority() >= vrouter.priority {
+                let m_down_interval = vrouter.master_down_interval;
+                vrouter.fsm.set_master_down_timer(m_down_interval);   
+            }
+            else if vrouter.priority > vrrp_packet.get_priority() {
+                vrouter.fsm.state = States::MASTER;
+                let advert_interval = vrouter.advert_interval as f32;
+                vrouter.fsm.set_advert_timer(advert_interval);
+                log::info!("({}) transitioned to MASTER", vrouter.name);
+                
+            } 
             else {
-                if !vrouter.preempt_mode || vrrp_packet.get_priority() >= vrouter.priority {
-                    let m_down_interval = vrouter.master_down_interval;
-                    vrouter.fsm.set_master_down_time(m_down_interval);
-                }
-                else {
-                    return
-                }
+                return 
             }
-
         }
         
         States::MASTER => {
@@ -135,7 +142,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
             
             else if adv_priority_gt_local_priority || ( adv_priority_eq_local_priority && send_ip_gt_local_ip) {
                 let m_down_interval = vrouter.master_down_interval as f32;
-                vrouter.fsm.set_master_down_time(m_down_interval);
+                vrouter.fsm.set_master_down_timer(m_down_interval);
                 vrouter.fsm.state = States::BACKUP;
             }
 
