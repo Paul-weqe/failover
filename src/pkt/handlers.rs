@@ -83,9 +83,8 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
     let vrrp_packet = VrrpPacket::new(ip_packet.payload()).unwrap();
     
     match vrouter.fsm.state {
-
+        
         States::BACKUP => {
-            println!("BACKUP");
             if vrrp_packet.get_priority() == 0 {
                 let skew_time = vrouter.skew_time;
                 vrouter.fsm.set_master_down_timer(skew_time);
