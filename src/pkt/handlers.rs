@@ -112,7 +112,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
                 let incoming_ip_pkt = Ipv4Packet::new(eth_packet.payload()).unwrap(); 
                 let adv_priority_gt_local_priority = vrrp_packet.get_priority() > vrouter.priority;
                 let adv_priority_eq_local_priority = vrrp_packet.get_priority() == vrouter.priority;
-                let send_ip_gt_local_ip = incoming_ip_pkt.get_source() > incoming_ip_pkt.get_destination();
+                let _send_ip_gt_local_ip = incoming_ip_pkt.get_source() > incoming_ip_pkt.get_destination();
                 
                 // If an ADVERTISEMENT is received, then
                 if vrrp_packet.get_priority() == 0 {

@@ -1,9 +1,9 @@
-use std::{error::Error, fs::File, io::BufReader, path::Path, process::Command};
-
-use serde::{Deserialize, Serialize};
+use std::process::Command;
+use failover::base_functions::read_config_from_json_file;
 use simple_logger::SimpleLogger;
 
-
+/// bin used to create the "virtual" IP addresses for the 
+/// interface that has been specified 
 fn main() {
     SimpleLogger::new().with_colors(true).init().unwrap();
     let config = read_config_from_json_file("./vrrp-config.json").unwrap();
@@ -21,33 +21,3 @@ fn main() {
         });
     }
 }
-
-fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
-    log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let u = serde_json::from_reader(reader)?;
-    Ok(u)
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FileConfig {
-    pub name: String,
-    pub vrid: u8,
-    pub ip_addresses: Vec<String>,
-    pub network_interface: String,
-
-    #[serde(default = "default_priority")]
-    pub priority: u8,
-
-    #[serde(default = "default_advert_int")]
-    pub advert_interval: u8,
-
-    #[serde(default = "default_preempt_mode")]
-    pub preempt_mode: bool,
-
-}
-
-pub fn default_priority() -> u8 { 100 }
-pub fn default_advert_int() -> u8 { 1 }
-pub fn default_preempt_mode() -> bool { true }

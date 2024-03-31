@@ -7,13 +7,13 @@ use tokio::sync::Mutex;
 use crate::{
     base_functions::{create_datalink_channel, get_interface}, 
     pkt::{generators, handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, 
-    router::VirtualRouter, state_machine::{Event, States}, CustomError
+    router::VirtualRouter, state_machine::{Event, States}, NetError
 };
 
 
 /// initiates the network functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub async fn init_network(vrouter: VirtualRouter) -> Result<(), CustomError>{
+pub async fn init_network(vrouter: VirtualRouter) -> Result<(), NetError>{
 
     let interface = get_interface(&vrouter.network_interface);
     let vrouter_mutex = Arc::new(Mutex::new(vrouter));
@@ -27,7 +27,7 @@ pub async fn init_network(vrouter: VirtualRouter) -> Result<(), CustomError>{
     if interface.ips.len() <= 1 {
         log::error!("Interface {} does not have any valid IP addresses", interface.name);
         return Result::Err(
-            CustomError(format!("Interface {} does not have any valid IP addresses", interface.name).into())
+            NetError(format!("Interface {} does not have any valid IP addresses", interface.name).into())
         );
     }
 

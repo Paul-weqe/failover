@@ -1,47 +1,25 @@
+use std::fmt::Display;
+
 mod router;
-mod converter;
-mod network;
+pub mod converter;
+pub mod network;
 mod state_machine;
 mod pkt;
 
-use std::{error::Error, fmt::Display, fs::File, io::BufReader, path::Path, process::Command};
-use simple_logger::SimpleLogger;
-
-#[tokio::main]
-async fn main(){
-    SimpleLogger::new().with_colors(true).init().unwrap();
-    let config = read_config_from_json_file("./vrrp-config.json").unwrap();
-    let vr = converter::config_to_vr(&config);
-
-    let init_network_ft = network::init_network(vr);
-    init_network_ft.await.unwrap_or_else(|err| {
-        log::error!("problem running VRRP process");
-        panic!("{err}");
-    });
-    
-}
-
-#[derive(Debug)]
-pub struct CustomError(String);
-
-impl Display for CustomError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-
-fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<base_functions::FileConfig, Box<dyn Error>> {
-    log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let u = serde_json::from_reader(reader)?;
-    Ok(u)
-}
-
 pub mod base_functions {
+    use std::{error::Error, fs::File, io::BufReader, path::Path};
+
     use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
     use serde::{Deserialize, Serialize};
+
+    pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
+        log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let u = serde_json::from_reader(reader)?;
+        Ok(u)
+    }
+    
 
     pub fn get_interface(name: &str) -> NetworkInterface {
         let interface_names_match = |iface: &NetworkInterface| iface.name == name;
@@ -83,4 +61,14 @@ pub mod base_functions {
     pub fn default_priority() -> u8 { 100 }
     pub fn default_advert_int() -> u8 { 1 }
     pub fn default_preempt_mode() -> bool { true }
+}
+
+
+#[derive(Debug)]
+pub struct NetError(String);
+
+impl Display for NetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
