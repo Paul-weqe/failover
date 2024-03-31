@@ -19,7 +19,7 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
     let mut_router = vrouter.lock().await;
     let interface = get_interface(&mut_router.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
-
+    
     match mut_router.fsm.state {
         States::INIT => {}
         States::BACKUP => {

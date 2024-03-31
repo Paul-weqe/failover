@@ -7,14 +7,13 @@ use tokio::sync::Mutex;
 use crate::{
     base_functions::{create_datalink_channel, get_interface}, 
     pkt::{generators, handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, 
-    router::VirtualRouter, state_machine::{Event, States}
+    router::VirtualRouter, state_machine::{Event, States}, CustomError
 };
 
 
 /// initiates the network functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub async fn init_network(vrouter: VirtualRouter)  
-{
+pub async fn init_network(vrouter: VirtualRouter) -> Result<(), CustomError>{
 
     let interface = get_interface(&vrouter.network_interface);
     let vrouter_mutex = Arc::new(Mutex::new(vrouter));
@@ -24,9 +23,12 @@ pub async fn init_network(vrouter: VirtualRouter)
     let event_vrouter_mutex = Arc::clone(&vrouter_mutex);
     let timer_vrouter_mutex = Arc::clone(&vrouter_mutex);
 
-    if interface.ips.len() == 0 {
+    // we will have already added our second IP address
+    if interface.ips.len() <= 1 {
         log::error!("Interface {} does not have any valid IP addresses", interface.name);
-        panic!("Interface {} does not have any valid IP addresses", interface.name);
+        return Result::Err(
+            CustomError(format!("Interface {} does not have any valid IP addresses", interface.name).into())
+        );
     }
 
     let mutable_pkt_generator = generators::MutablePktGenerator::new( interface.clone() );
@@ -295,7 +297,7 @@ pub async fn init_network(vrouter: VirtualRouter)
         event_listener_process,
         timers_counter_process
     );
-
+    Ok(())
 }
 
 pub mod checksum 
