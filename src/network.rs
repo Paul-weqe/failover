@@ -7,7 +7,8 @@ use tokio::sync::Mutex;
 use crate::{
     base_functions::{create_datalink_channel, get_interface}, 
     pkt::{generators, handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, 
-    router::VirtualRouter, state_machine::{Event, States}, NetError
+    router::VirtualRouter, state_machine::{Event, States},
+    error::NetError
 };
 
 

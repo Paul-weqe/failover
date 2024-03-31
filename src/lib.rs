@@ -1,74 +1,31 @@
-use std::fmt::Display;
-
-mod router;
 pub mod converter;
 pub mod network;
+pub mod base_functions;
+pub mod config;
+
+mod router;
 mod state_machine;
 mod pkt;
 
-pub mod base_functions {
-    use std::{error::Error, fs::File, io::BufReader, path::Path};
 
-    use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
-    use serde::{Deserialize, Serialize};
+pub mod error{
+    use std::fmt::Display;
 
-    pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
-        log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        let u = serde_json::from_reader(reader)?;
-        Ok(u)
-    }
+    #[derive(Debug)]
+    pub struct NetError(pub String);
     
-
-    pub fn get_interface(name: &str) -> NetworkInterface {
-        let interface_names_match = |iface: &NetworkInterface| iface.name == name;
-        let interfaces = datalink::linux::interfaces();
-        interfaces
-            .into_iter()
-            .filter(interface_names_match)
-            .next()
-            .unwrap()
-    }
-    
-    pub fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
-        match pnet::datalink::channel(interface, Default::default()) {
-            Ok(Channel::Ethernet(tx, rx)) => return (tx, rx),
-            Ok(_) => panic!("Unknown channel type"),
-            Err(e) => panic!("Error happened: {}", e)
+    impl Display for NetError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
         }
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct FileConfig {
-        pub name: String,
-        pub vrid: u8,
-        pub ip_addresses: Vec<String>,
-        pub network_interface: String,
+    #[derive(Debug)]
+    pub struct OptError(pub String);
 
-
-        #[serde(default = "default_priority")]
-        pub priority: u8,
-
-        #[serde(default = "default_advert_int")]
-        pub advert_interval: u8,
-
-        #[serde(default = "default_preempt_mode")]
-        pub preempt_mode: bool,
-
-    }
-
-    pub fn default_priority() -> u8 { 100 }
-    pub fn default_advert_int() -> u8 { 1 }
-    pub fn default_preempt_mode() -> bool { true }
-}
-
-
-#[derive(Debug)]
-pub struct NetError(String);
-
-impl Display for NetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+    impl Display for OptError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
     }
 }
