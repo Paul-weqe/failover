@@ -1,6 +1,5 @@
 
 use ipnet::Ipv4Net;
-use pnet::util::MacAddr;
 
 use crate::state_machine::VirtualRouterMachine;
 
@@ -16,12 +15,4 @@ pub struct VirtualRouter {
     pub preempt_mode: bool,
     pub network_interface: String,
     pub fsm: VirtualRouterMachine
-}
-
-impl VirtualRouter {
-
-    pub fn mac(&self) -> MacAddr {
-        MacAddr::new(0x00, 0x00, 0x5E, 0x00, 0x01, self.vrid)
-    }
-
 }

@@ -19,7 +19,6 @@ pub async fn init_network(vrouter: VirtualRouter)
     let interface = get_interface(&vrouter.network_interface);
     let vrouter_mutex = Arc::new(Mutex::new(vrouter));
 
-    
     // mutexes to be used in the Network, Event and Timer listeners 
     let net_vrouter_mutex = Arc::clone(&vrouter_mutex);
     let event_vrouter_mutex = Arc::clone(&vrouter_mutex);
@@ -47,7 +46,7 @@ pub async fn init_network(vrouter: VirtualRouter)
             let buf = rx.next().unwrap();
             let incoming_eth_pkt = EthernetPacket::new(&buf).unwrap();
             match incoming_eth_pkt.get_ethertype() {
-                
+
                 EtherTypes::Ipv4 => {
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
@@ -83,12 +82,19 @@ pub async fn init_network(vrouter: VirtualRouter)
 
             match timer.t_type {
                 crate::state_machine::TimerType::MasterDownTimer => {
-                    if timer_vrouter.fsm.timer.remaining_time <= 0.0 {
+                    if timer_vrouter.fsm.timer.remaining_time > 0.0 {
                         timer_vrouter.fsm.reduce_timer();
+                    } 
+                    else {
+                        timer_vrouter.fsm.state = States::MASTER;
+                        log::info!("({}) transitioned to MASTER", timer_vrouter.name);
+                        let advert_interval = timer_vrouter.advert_interval as f32;
+                        timer_vrouter.fsm.set_advert_timer(advert_interval);
                     }
                 }
 
                 crate::state_machine::TimerType::AdvertTimer => {
+
                     if timer_vrouter.fsm.timer.remaining_time <= 0.0 {
                         // VRRP pakcet
                         let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * timer_vrouter.ip_addresses.len())];
@@ -120,14 +126,14 @@ pub async fn init_network(vrouter: VirtualRouter)
         }
     });
 
-
     // listens to any event as it comes in
     let event_listener_process = tokio::spawn(async move {
-        
+
         loop {
 
             let mut event_vrouter = event_vrouter_mutex.lock().await;
             match &event_vrouter.fsm.event {
+                
                 Event::Startup => {
                     if event_vrouter.fsm.state == States::INIT {
                         if event_vrouter.priority == 255 {
@@ -153,8 +159,7 @@ pub async fn init_network(vrouter: VirtualRouter)
                             let mut ip_buff: Vec<u8> = vec![0; ip_len];
                             let mut ip_packet = event_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
                             ip_packet.set_payload(vrrp_packet.packet());
-                
-                
+
                             // Ethernet packet
                             let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
                             let mut ether_packet = event_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
@@ -180,51 +185,50 @@ pub async fn init_network(vrouter: VirtualRouter)
                             let advert_time = event_vrouter.advert_interval as f32;
                             event_vrouter.fsm.set_advert_timer(advert_time);
                             event_vrouter.fsm.state = States::MASTER;
-                            log::info!("({}) transitioned to MASTER", event_vrouter.name);
+                            log::info!("({}) transitioned to MASTER (init)", event_vrouter.name);
                         }
                 
                         else {
                             let m_down_interval = event_vrouter.master_down_interval;
                             event_vrouter.fsm.set_master_down_timer(m_down_interval);
                             event_vrouter.fsm.state = States::BACKUP;
-                            log::info!("({}) transitioned to BACKUP", event_vrouter.name);
+                            log::info!("({}) transitioned to BACKUP (init)", event_vrouter.name);
                         }
                     }
                 }
 
                 Event::Shutdown => {
+                    match event_vrouter.fsm.state {
+                        States::BACKUP => {
+                            event_vrouter.fsm.disable_timer();
+                            event_vrouter.fsm.state = States::INIT;
+                        }
+                        States::MASTER => {
+                            event_vrouter.fsm.disable_timer();
+                            // send ADVERTIEMENT 
+                            // VRRP pakcet
+                            let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * event_vrouter.ip_addresses.len())];
+                            let mut vrrp_packet = event_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &event_vrouter).await;
+                            vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
+                            
+                            // IP packet
+                            let ip_len = vrrp_packet.packet().len() + 20;
+                            let mut ip_buff: Vec<u8> = vec![0; ip_len];
+                            let mut ip_packet = event_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
+                            ip_packet.set_payload(vrrp_packet.packet());
 
-                    log::info!("({}) Shudown Event", &event_vrouter.name);
-                    if event_vrouter.fsm.state == States::BACKUP {
-                        event_vrouter.fsm.disable_timer();
-                        event_vrouter.fsm.state = States::INIT;
-                    }
+                            // Ethernet packet
+                            let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
+                            let mut ether_packet = event_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
+                            ether_packet.set_payload(ip_packet.packet());  
+                            event_sender
+                                .send_to(ether_packet.packet(), None)
+                                .unwrap()
+                                .unwrap();
 
-                    else if event_vrouter.fsm.state == States::MASTER {
-
-                        event_vrouter.fsm.disable_timer();
-                        // send ADVERTIEMENT 
-                        // VRRP pakcet
-                        let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * event_vrouter.ip_addresses.len())];
-                        let mut vrrp_packet = event_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &event_vrouter).await;
-                        vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
-                        
-                        // IP packet
-                        let ip_len = vrrp_packet.packet().len() + 20;
-                        let mut ip_buff: Vec<u8> = vec![0; ip_len];
-                        let mut ip_packet = event_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
-                        ip_packet.set_payload(vrrp_packet.packet());
-
-                        // Ethernet packet
-                        let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
-                        let mut ether_packet = event_pkt_generator.gen_vrrp_eth_packet(&mut eth_buffer);
-                        ether_packet.set_payload(ip_packet.packet());  
-                        event_sender
-                            .send_to(ether_packet.packet(), None)
-                            .unwrap()
-                            .unwrap();
-
-                        event_vrouter.fsm.state = States::INIT;
+                            event_vrouter.fsm.state = States::INIT;
+                        }
+                        States::INIT => {}
                     }
                 }
 
@@ -274,6 +278,7 @@ pub async fn init_network(vrouter: VirtualRouter)
                         let advert_interval = event_vrouter.advert_interval as f32;
                         event_vrouter.fsm.set_advert_timer(advert_interval);
                         event_vrouter.fsm.state = States::MASTER;
+                        log::info!("({}) Transitioned to MASTER", event_vrouter.name);
 
                     }
                     log::info!("({}) Master Down Event", &event_vrouter.name);
