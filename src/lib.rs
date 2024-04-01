@@ -20,6 +20,8 @@ pub mod error{
         }
     }
 
+
+    /// used for getting errors when parsing CLI arguments
     #[derive(Debug)]
     pub struct OptError(pub String);
 

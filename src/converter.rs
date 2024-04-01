@@ -1,6 +1,6 @@
 use ipnet::Ipv4Net;
 
-use crate::{config::{BaseConfig, VrrpConfig}, router::VirtualRouter, state_machine::VirtualRouterMachine};
+use crate::{config::VrrpConfig, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use std::{f32, str::FromStr};
 
 pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {

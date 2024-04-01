@@ -4,14 +4,6 @@ use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
 
-pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
-    log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let u = serde_json::from_reader(reader)?;
-    Ok(u)
-}
-
 
 pub fn get_interface(name: &str) -> NetworkInterface {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
@@ -36,10 +28,8 @@ pub fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLi
 
 
 pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
-
-    // let mut program = args[0].clone();
     let mut opts = Options::new();
-    
+
     opts.optflag("h", "help", "display help information");
     
     // name
@@ -96,6 +86,14 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         "the json file with the necessary configurations", 
     "vrrp-config.json");
 
+    if args[1..].is_empty() || args[1..].contains(&"--help".to_string()) {
+
+        println!("HELP");
+        println!("{}", opts.usage("Failover Usage: \n"));
+        std::process::exit(1);
+
+    }
+
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
         Err(err) => return Result::Err(OptError(err.to_string().into()))
@@ -149,3 +147,12 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     
 }
 
+
+
+pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
+    log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let u = serde_json::from_reader(reader)?;
+    Ok(u)
+}
