@@ -1,10 +1,9 @@
 #!/bin/bash 
 
 cargo build 
-
-# create the IP addresses
-sudo ./target/debug/create_addresses
-sudo ./target/debug/failover
+sudo ./target/debug/failover --json-file vrrp-config.json --action startup
+sudo ./target/debug/failover --json-file vrrp-config.json --action run
 pid=$!
 wait $pid
-sudo ./target/debug/delete_addresses
+sudo ./target/debug/failover --json-file vrrp-config.json --action teardown
+

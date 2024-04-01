@@ -1,5 +1,5 @@
 
-use std::{error::Error, fs::File, io::BufReader, path::Path};
+use std::{error::Error, fs::File, io::BufReader, path::Path, process::Command};
 use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
@@ -32,66 +32,71 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
     opts.optflag("h", "help", "display help information");
     
+    opts.optopt(
+        "A", 
+        "action", 
+        "action that will be done to the interfaces ['create' or 'delete']", 
+        "(--action startup / --action teardown / --action run)");
+
     // name
-    opts.reqopt(
+    opts.optopt(
         "n", 
         "name", 
         "name of the virtual router instance.",
-    "When logging, this will help in identifying which instance is being referred to");
+    "(--name VR_1)");
     
     // vrid 
-    opts.reqopt(
+    opts.optopt(
         "v", 
         "vrid", 
-        "The Virtual Router ID of the instance.", 
-        "Should be in the range of 1-255. Each Instance in the VRRP group must have a unique VRID"
-    );
+        "The Virtual Router ID of the instance. In the range of 1-255", 
+        "(--vrid 51)");
 
     // ip addresses 
     opts.optmulti(
     "I", 
     "ip-address", 
     "An Ip address that is associated with the virtual router instance", 
-    "Virtual Ip Address that is to be seen by end users as an actual IP address");
+    "(--ip-address 192.168.100.5/24)");
 
     // interface name
-    opts.reqopt(
+    opts.optopt(
         "i", 
         "iface", 
-        "The interfaece that the virtual IP(s) will be attached to", 
-        "The ethernet interface that will be receiving the packets. preferably wifi / ethernet / optical interface");
+        "The interfaece that the virtual IP(s) will be attached to.", 
+        "(--iface eth0)");
     
     // priority
     opts.optopt(
         "p", 
         "priority", 
-        "priority of the virutal router in the VRRP network group", 
-        "Give higher priority to instances that you want to be first selected as MASTER.");
+        "priority of the virutal router in the VRRP network group. In the range 1-44", 
+        "(--priority 100)");
     
     opts.optopt(
         "a", 
         "adv-interval", 
         "When in master, the interval when ADVERTISEMENTS should be carried across", 
-    "default 1. ");
+    "(--adv-interval 2)");
 
     opts.optopt(
         "P", 
         "preempt-mode", 
         "Controls whether a higher priority Backup router preempts a lower priority Master.", 
-    "");
+    "(--preempt-mode false)");
 
     opts.optopt(
         "j", 
         "json-file", 
         "the json file with the necessary configurations", 
-    "vrrp-config.json");
+    "(--json-file vrrp-config.json)");
 
+
+    // if it is the help request
     if args[1..].is_empty() || args[1..].contains(&"--help".to_string()) {
-
         println!("HELP");
         println!("{}", opts.usage("Failover Usage: \n"));
         std::process::exit(1);
-
     }
 
     let matches = match opts.parse(&args[1..]) {
@@ -101,55 +106,96 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
     if matches.opt_str("json-file") != None {
         let filename = matches.opt_str("json-file").unwrap();
-        match read_config_from_json_file(&filename) {
-            Ok(config) => return Ok(VrrpConfig::File(config)),
-            Err(_) => return Result::Err(OptError(format!("Problem Parsing file {}", &filename)))
+        let file_config = match read_config_from_json_file(&filename) {
+            Ok(config) => VrrpConfig::File(config),
+            Err(err) => {
+                log::error!("{err}");
+                return  Result::Err(OptError(format!("Problem Parsing file {}", &filename)))
+            }
         };
+
+        match matches.opt_str("action") {
+            Some (x) => {
+                if vec!["startup", "teardown"].contains(&x.to_lowercase().as_str()){
+                    let action = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
+                    virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
+                    std::process::exit(1);
+                } else if x.to_lowercase().as_str() == "run" {
+                    return Ok(file_config)
+                } else {
+                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
+                }
+            }
+            
+            None => {
+                return Ok(file_config)
+            }
+        }
     } else {
 
-        let mut config = CliConfig::default();
-        config.name = match matches.opt_str("name") {
+        let mut cli_config = CliConfig::default();
+        cli_config.name = match matches.opt_str("name") {
             Some(x) => x,
             None => return Result::Err(OptError("instance name '--name' is a mandatory field".into()))
         };
     
-        config.vrid = match matches.opt_str("vrid") {
+        cli_config.vrid = match matches.opt_str("vrid") {
             Some(x) => x.parse::<u8>().unwrap(),
             None => return Result::Err(OptError("VRID '--vrid' is a mandatory field".into()))
         };
     
-        config.interface_name = match matches.opt_str("iface") {
+        cli_config.interface_name = match matches.opt_str("iface") {
             Some(x) => x,
             None => return Result::Err(OptError("interface name '--iface' is a mandatory field".into()))
         };
     
         for addr in matches.opt_strs("ip-address") {
-            config.ip_addresses.push(addr);
+            cli_config.ip_addresses.push(addr);
         }
     
-        config.priority = match matches.opt_str("priority") {
+        cli_config.priority = match matches.opt_str("priority") {
             Some(x) => x.parse::<u8>().unwrap(),
-            None => config.priority
+            None => cli_config.priority
         };
     
-        config.advert_interval = match matches.opt_str("adv-interval") {
+        cli_config.advert_interval = match matches.opt_str("adv-interval") {
             Some(x) => x.parse::<u8>().unwrap(),
-            None => config.advert_interval
+            None => cli_config.advert_interval
         };
-        config.preempt_mode = match matches.opt_str("preempt-mode") {
+        cli_config.preempt_mode = match matches.opt_str("preempt-mode") {
             Some (x) => x.parse::<bool>().unwrap(),
-            None => config.preempt_mode
+            None => cli_config.preempt_mode
         };
-    
-        Ok(VrrpConfig::Cli(config))
+
+        match matches.opt_str("action") {
+            Some (x) => {
+                if !(vec!["delete", "add"].contains(&x.to_lowercase().as_str())){
+                    return Result::Err(OptError("".into()));
+                } 
+                virtual_address_action(x.to_lowercase().as_str(), &cli_config.ip_addresses, &cli_config.interface_name); 
+            }
+            
+            None => {}
+        }
+        Ok(VrrpConfig::Cli(cli_config))
     }
-    
-    
+
+}
+
+fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
+{
+    for addr in addresses {
+        let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];
+        let _ = Command::new("sudo")
+            .args(cmd_args)
+            .output();
+    }
 }
 
 
 
-pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> {
+pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> 
+{
     log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
     let file = File::open(path)?;
     let reader = BufReader::new(file);
