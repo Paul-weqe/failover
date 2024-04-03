@@ -308,7 +308,7 @@ pub mod checksum
     //! This module is dedicated to internet checksums functions.
     //!
     //! credit for rfc1071, propagate_carries and one_complement_sum 
-    //! calculation to ref. impl. https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs
+    //! calculation to ref. impl. <https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs>
     //! and rust's rVVRP github 
     use byteorder::{ByteOrder, NetworkEndian};
     const _RFC1071_CHUNK_SIZE: usize = 32;
