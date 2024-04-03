@@ -8,16 +8,12 @@ use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInt
 pub fn get_interface(name: &str) -> NetworkInterface {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
     let interfaces = datalink::linux::interfaces();
-    interfaces
-        .into_iter()
-        .filter(interface_names_match)
-        .next()
-        .unwrap()
+    interfaces.into_iter().find(interface_names_match).unwrap()
 }
 
 pub fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
     match pnet::datalink::channel(interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => return (tx, rx),
+        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("Unknown channel type"),
         Err(err) => {
             log::error!("Unable to create datalink channel");
@@ -101,10 +97,10 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
-        Err(err) => return Result::Err(OptError(err.to_string().into()))
+        Err(err) => return Result::Err(OptError(err.to_string()))
     };
 
-    if matches.opt_str("json-file") != None {
+    if matches.opt_str("json-file").is_some() {
         let filename = matches.opt_str("json-file").unwrap();
         let file_config = match read_config_from_json_file(&filename) {
             Ok(config) => VrrpConfig::File(config),
@@ -116,7 +112,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
         match matches.opt_str("action") {
             Some (x) => {
-                if vec!["startup", "teardown"].contains(&x.to_lowercase().as_str()){
+                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
                     let action = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
                     virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
                     std::process::exit(1);
@@ -128,7 +124,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
             }
             
             None => {
-                return Ok(file_config)
+                Ok(file_config)
             }
         }
     } else {
@@ -167,15 +163,11 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
             None => cli_config.preempt_mode
         };
 
-        match matches.opt_str("action") {
-            Some (x) => {
-                if !(vec!["delete", "add"].contains(&x.to_lowercase().as_str())){
-                    return Result::Err(OptError("".into()));
-                } 
-                virtual_address_action(x.to_lowercase().as_str(), &cli_config.ip_addresses, &cli_config.interface_name); 
-            }
-            
-            None => {}
+        if let Some(x) = matches.opt_str("action") {
+            if !(["delete", "add"].contains(&x.to_lowercase().as_str())){
+                return Result::Err(OptError("".into()));
+            } 
+            virtual_address_action(x.to_lowercase().as_str(), &cli_config.ip_addresses, &cli_config.interface_name); 
         }
         Ok(VrrpConfig::Cli(cli_config))
     }

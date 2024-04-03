@@ -18,7 +18,7 @@ pub struct MutablePktGenerator {
 
 impl MutablePktGenerator 
 {
-    pub fn new<'a>(interface: NetworkInterface) -> Self 
+    pub fn new(interface: NetworkInterface) -> Self 
     {
         MutablePktGenerator {
             interface 
@@ -50,7 +50,7 @@ impl MutablePktGenerator
             log::error!("VRRP packet cannot have more than 20 IP addresses");
             panic!("VRRP configuration VRID={} has more than 20 IP addresses", vrrp_pkt.get_vrid());
         }
-        if vrrp_pkt.get_ip_addresses().len() == 0 {
+        if vrrp_pkt.get_ip_addresses().is_empty() {
             log::error!("VRRP packet must have a virtual ip address");
             panic!("VRRP configuration VRID={} does not have an ip address", vrrp_pkt.get_vrid());
         }

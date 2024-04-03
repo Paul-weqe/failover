@@ -21,8 +21,8 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
     
     match mut_router.fsm.state {
-        States::INIT => {}
-        States::BACKUP => {
+        States::Init => {}
+        States::Backup => {
             // MUST NOT respond to ARP requests for the IP address(s) associated 
             // with the virtual router.
             for ip in &mut_router.ip_addresses {
@@ -31,14 +31,15 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
                 }
             }
             
+            // !TODO
             // MUST discard packets with a destination link layer MAC address
             // equal to the virtual router MAC address.
-            if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
-                return
-            }
+            // if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
+            //     return
+            // }
         }
 
-        States::MASTER => {
+        States::Master => {
             // MUST respond to ARP requests for the IP address(es) associated
             // with the virtual router.
             for ip in &mut_router.ip_addresses {
@@ -87,7 +88,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
     if interface.ips.first().unwrap().ip() != ip_packet.get_source() {
         match vrouter.fsm.state {
             
-            States::BACKUP => {
+            States::Backup => {
                 if vrrp_packet.get_priority() == 0 {
                     let skew_time = vrouter.skew_time;
                     vrouter.fsm.set_master_down_timer(skew_time);
@@ -97,7 +98,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
                     vrouter.fsm.set_master_down_timer(m_down_interval);   
                 }
                 else if vrouter.priority > vrrp_packet.get_priority() {
-                    vrouter.fsm.state = States::MASTER;
+                    vrouter.fsm.state = States::Master;
                     let advert_interval = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_interval);
                     log::info!("({}) transitioned to MASTER", vrouter.name);
@@ -108,7 +109,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
                 }
             }
             
-            States::MASTER => {
+            States::Master => {
                 let incoming_ip_pkt = Ipv4Packet::new(eth_packet.payload()).unwrap(); 
                 let adv_priority_gt_local_priority = vrrp_packet.get_priority() > vrouter.priority;
                 let adv_priority_eq_local_priority = vrrp_packet.get_priority() == vrouter.priority;
@@ -140,19 +141,26 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
                         .unwrap();
                     let advert_interval = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_interval);
-                    vrouter.fsm.event = Event::NoEvent;
+                    vrouter.fsm.event = Event::Null;
 
                 }
                 
-                else if adv_priority_gt_local_priority || ( adv_priority_eq_local_priority && adv_priority_eq_local_priority) 
+                else if adv_priority_gt_local_priority 
                 {
                     let m_down_interval = vrouter.master_down_interval as f32;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
-                    vrouter.fsm.state = States::BACKUP;
-                    vrouter.fsm.event = Event::NoEvent;
+                    vrouter.fsm.state = States::Backup;
+                    vrouter.fsm.event = Event::Null;
                     log::info!("({}) transitioned to BACKUP", vrouter.name);
                 }
+                else if adv_priority_eq_local_priority {
 
+                    let m_down_interval = vrouter.master_down_interval as f32;
+                    vrouter.fsm.set_master_down_timer(m_down_interval);
+                    vrouter.fsm.state = States::Backup;
+                    vrouter.fsm.event = Event::Null;
+                    log::info!("({}) transitioned to BACKUP", vrouter.name);
+                }
                 else {
                     return
                 }
