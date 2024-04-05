@@ -55,7 +55,12 @@ pub async fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
                     
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                        handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&net_vrouter_mutex)).await;
+                        match handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&net_vrouter_mutex)).await {
+                            Ok(_) => {}
+                            Err(_) => {
+                                continue;
+                            }
+                        }
                     }
                     
                     else if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Icmp {

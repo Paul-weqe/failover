@@ -1,4 +1,4 @@
-
+use std::net::Ipv4Addr;
 use ipnet::Ipv4Net;
 
 use crate::state_machine::VirtualRouterMachine;
@@ -16,3 +16,13 @@ pub struct VirtualRouter {
     pub network_interface: String,
     pub fsm: VirtualRouterMachine
 }
+
+impl VirtualRouter {
+    pub fn ipv4_addresses(&self) -> Vec<Ipv4Addr> {
+        let mut addrs: Vec<Ipv4Addr> = vec![];
+        for a in self.ip_addresses.iter() {
+            addrs.push(a.addr());
+        }
+        addrs
+    }
+ }

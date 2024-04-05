@@ -12,7 +12,7 @@ const _RFC1071_CHUNK_SIZE: usize = 32;
 // rfc1071() function
 /// compute rfc1071 internet checksum
 /// returns all-ones if carried checksum is valid
-pub fn _rfc1071(mut data: &[u8]) -> u16 
+pub(crate) fn confirm_checksum(mut data: &[u8]) -> u16 
 {
     let mut acc = 0;
 
@@ -39,11 +39,11 @@ pub fn _rfc1071(mut data: &[u8]) -> u16
         acc += (v as u32) << 8;
     }
 
-    _propagate_carries(acc)
+    propagate_carries(acc)
 }
 
 // propagate final complement?
-pub fn _propagate_carries(word: u32) -> u16 
+fn propagate_carries(word: u32) -> u16 
 {
     let sum = (word >> 16) + (word & 0xffff);
     ((sum >> 16) as u16) + (sum as u16)
@@ -51,7 +51,7 @@ pub fn _propagate_carries(word: u32) -> u16
 
 // one_complement_sum() function
 /// returns all-zeros if checksum is valid
-pub fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
+pub(crate) fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
 {
     let mut sum = 0u32;
     let mut idx = 0;
