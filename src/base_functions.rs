@@ -5,13 +5,13 @@ use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
 
 
-pub fn get_interface(name: &str) -> NetworkInterface {
+pub(crate) fn get_interface(name: &str) -> NetworkInterface {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
     let interfaces = datalink::linux::interfaces();
     interfaces.into_iter().find(interface_names_match).unwrap()
 }
 
-pub fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
+pub(crate) fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
     match pnet::datalink::channel(interface, Default::default()) {
         Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("Unknown channel type"),
@@ -26,12 +26,13 @@ pub fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLi
 pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     let mut opts = Options::new();
 
-    opts.optflag("h", "help", "display help information");
+    opts.optflag("H", "help", "display help information");
+    opts.optflag("C", "cli", "use the cli config option");
     
     opts.optopt(
         "A", 
         "action", 
-        "action that will be done to the interfaces ['create' or 'delete']", 
+        "action that will be done to the addresses on the interface configured. Default is 'run'", 
         "(--action startup / --action teardown / --action run)");
 
     // name
@@ -82,14 +83,14 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     "(--preempt-mode false)");
 
     opts.optopt(
-        "j", 
-        "json-file", 
-        "the json file with the necessary configurations", 
-    "(--json-file vrrp-config.json)");
+        "f", 
+        "file", 
+        "the json file with the necessary configurations. Default is 'vrrp-config.json'", 
+    "(--file vrrp-config.json)");
 
 
     // if it is the help request
-    if args[1..].is_empty() || args[1..].contains(&"--help".to_string()) {
+    if args[1..].contains(&"--help".to_string()) {
         println!("HELP");
         println!("{}", opts.usage("Failover Usage: \n"));
         std::process::exit(1);
@@ -100,34 +101,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         Err(err) => return Result::Err(OptError(err.to_string()))
     };
 
-    if matches.opt_str("json-file").is_some() {
-        let filename = matches.opt_str("json-file").unwrap();
-        let file_config = match read_config_from_json_file(&filename) {
-            Ok(config) => VrrpConfig::File(config),
-            Err(err) => {
-                log::error!("{err}");
-                return  Result::Err(OptError(format!("Problem Parsing file {}", &filename)))
-            }
-        };
-
-        match matches.opt_str("action") {
-            Some (x) => {
-                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
-                    let action = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
-                    virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
-                    std::process::exit(1);
-                } else if x.to_lowercase().as_str() == "run" {
-                    return Ok(file_config)
-                } else {
-                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
-                }
-            }
-            
-            None => {
-                Ok(file_config)
-            }
-        }
-    } else {
+    if matches.opt_str("cli").is_some() {
 
         let mut cli_config = CliConfig::default();
         cli_config.name = match matches.opt_str("name") {
@@ -163,15 +137,54 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
             None => cli_config.preempt_mode
         };
 
-        if let Some(x) = matches.opt_str("action") {
-            if !(["delete", "add"].contains(&x.to_lowercase().as_str())){
-                return Result::Err(OptError("".into()));
-            } 
-            virtual_address_action(x.to_lowercase().as_str(), &cli_config.ip_addresses, &cli_config.interface_name); 
-        }
-        Ok(VrrpConfig::Cli(cli_config))
-    }
+        match matches.opt_str("action") {
+            Some(x) => {
 
+                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
+                    let action_cmd = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
+                    virtual_address_action(action_cmd, &cli_config.ip_addresses, &cli_config.interface_name);
+                    std::process::exit(1);
+                } 
+                // else if !["run"].contains(&x.to_lowercase().as_str()) 
+                else {
+                    println!("ACTION: {:?}", &x.to_lowercase());
+                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
+                }
+            }
+            None => {
+
+                // return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
+            }
+        }
+        return Ok(VrrpConfig::Cli(cli_config));
+    } else {
+        let filename = if matches.opt_str("file").is_some() { matches.opt_str("file").unwrap() } else { "vrrp-config.json".to_string() };
+        let file_config = match read_config_from_json_file(&filename) {
+            Ok(config) => VrrpConfig::File(config),
+            Err(err) => {
+                log::error!("{err}");
+                return  Result::Err(OptError(format!("Problem Parsing file {}", &filename)))
+            }
+        };
+
+        match matches.opt_str("action") {
+            Some (x) => {
+                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
+                    let action = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
+                    virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
+                    std::process::exit(1);
+                } else if !["run"].contains(&x.to_lowercase().as_str()) {
+                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run' ".into()));
+                } else {
+                    Ok(file_config)
+                }
+            }
+            
+            None => {
+                Ok(file_config)
+            }
+        }
+    } 
 }
 
 fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
@@ -186,7 +199,7 @@ fn virtual_address_action(action: &str, addresses: &[String], interface_name: &s
 
 
 
-pub fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> 
+fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn Error>> 
 {
     log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
     let file = File::open(path)?;

@@ -6,7 +6,7 @@ pub mod config;
 mod router;
 mod state_machine;
 mod pkt;
-
+mod checksum;
 
 pub mod error{
     use std::fmt::Display;

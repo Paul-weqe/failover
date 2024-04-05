@@ -12,20 +12,20 @@ use vrrp_packet::MutableVrrpPacket;
 use crate::router::VirtualRouter;
 
 #[derive(Clone)]
-pub struct MutablePktGenerator {
+pub(crate) struct MutablePktGenerator {
     interface: NetworkInterface
 }
 
 impl MutablePktGenerator 
 {
-    pub fn new(interface: NetworkInterface) -> Self 
+    pub(crate) fn new(interface: NetworkInterface) -> Self 
     {
         MutablePktGenerator {
             interface 
         }
     }
 
-    pub async fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8], vrouter: &MutexGuard<'_, VirtualRouter>) -> MutableVrrpPacket<'a>
+    pub(crate) async fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8], vrouter: &MutexGuard<'_, VirtualRouter>) -> MutableVrrpPacket<'a>
     {
         let mut addresses: Vec<u8> = Vec::new();
         for addr in &vrouter.ip_addresses {
@@ -57,7 +57,7 @@ impl MutablePktGenerator
         vrrp_pkt
     }
 
-    pub fn gen_vrrp_ip_header<'a>(&self, buffer: &'a mut [u8]) -> MutableIpv4Packet<'a>
+    pub(crate) fn gen_vrrp_ip_header<'a>(&self, buffer: &'a mut [u8]) -> MutableIpv4Packet<'a>
     {
         let ip = self.interface.ips.first().unwrap().ip();
         let len = buffer.len();
@@ -79,7 +79,7 @@ impl MutablePktGenerator
         ip_pkt
     }
 
-    pub fn gen_vrrp_eth_packet<'a>(&self, buffer: &'a mut [u8]) -> MutableEthernetPacket<'a> 
+    pub(crate) fn gen_vrrp_eth_packet<'a>(&self, buffer: &'a mut [u8]) -> MutableEthernetPacket<'a> 
     {
         let mut ether_pkt = MutableEthernetPacket::new(&mut buffer[..]).unwrap();
         ether_pkt.set_source(self.interface.mac.unwrap());
@@ -88,7 +88,7 @@ impl MutablePktGenerator
         ether_pkt
     }
 
-    pub fn gen_gratuitous_arp_packet<'a>(
+    pub(crate) fn gen_gratuitous_arp_packet<'a>(
         &self, eth_buffer: &'a mut [u8], arp_buffer: &'a mut [u8], ip: Ipv4Addr
     ) -> (MutableEthernetPacket<'a>, MutableArpPacket<'a>) 
     {

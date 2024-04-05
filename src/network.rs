@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 use pnet::packet::{
-    ethernet::{ EtherTypes, EthernetPacket }, 
-    ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
+    ethernet::{ EtherTypes, EthernetPacket }, icmp::IcmpPacket, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
 use tokio::sync::Mutex;
 use crate::{
@@ -10,11 +9,12 @@ use crate::{
     router::VirtualRouter, state_machine::{Event, States},
     error::NetError
 };
+use crate::checksum;
 
 
 /// initiates the network functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub async fn init_network(vrouter: VirtualRouter) -> Result<(), NetError>{
+pub async fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
 
     let interface = get_interface(&vrouter.network_interface);
     let vrouter_mutex = Arc::new(Mutex::new(vrouter));
@@ -51,9 +51,17 @@ pub async fn init_network(vrouter: VirtualRouter) -> Result<(), NetError>{
             match incoming_eth_pkt.get_ethertype() {
 
                 EtherTypes::Ipv4 => {
+                    // println!("IPV4!!!");
+                    
                     let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
                     if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
                         handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&net_vrouter_mutex)).await;
+                    }
+                    
+                    else if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Icmp {
+                        println!("ICMP!!!");
+                        let icmp = IcmpPacket::new(incoming_ip_pkt.payload()).unwrap();
+                        println!("{:#?}", icmp);
                     }
                 }
                 
@@ -299,87 +307,4 @@ pub async fn init_network(vrouter: VirtualRouter) -> Result<(), NetError>{
         timers_counter_process
     );
     Ok(())
-}
-
-pub mod checksum 
-{
-
-    //! checksums related functions module
-    //! This module is dedicated to internet checksums functions.
-    //!
-    //! credit for rfc1071, propagate_carries and one_complement_sum 
-    //! calculation to ref. impl. <https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs>
-    //! and rust's rVVRP github 
-    use byteorder::{ByteOrder, NetworkEndian};
-    const _RFC1071_CHUNK_SIZE: usize = 32;
-
-    // rfc1071() function
-    /// compute rfc1071 internet checksum
-    /// returns all-ones if carried checksum is valid
-    pub fn _rfc1071(mut data: &[u8]) -> u16 
-    {
-        let mut acc = 0;
-
-        // for each 32 bytes chunk
-        while data.len() >= _RFC1071_CHUNK_SIZE {
-            let mut d = &data[.._RFC1071_CHUNK_SIZE];
-            while d.len() >= 2 {
-                // sum adjacent pairs converted to 16 bits integer
-                acc += NetworkEndian::read_u16(d) as u32;
-                // take the next 2 bytes for the next iteration
-                d = &d[2..];
-            }
-            data = &data[_RFC1071_CHUNK_SIZE..];
-        }
-
-        // if it does not fit a 32 bytes chunk
-        while data.len() >= 2 {
-            acc += NetworkEndian::read_u16(data) as u32;
-            data = &data[2..];
-        }
-
-        // add odd byte is present
-        if let Some(&v) = data.first() {
-            acc += (v as u32) << 8;
-        }
-
-        _propagate_carries(acc)
-    }
-
-    // propagate final complement?
-    pub fn _propagate_carries(word: u32) -> u16 
-    {
-        let sum = (word >> 16) + (word & 0xffff);
-        ((sum >> 16) as u16) + (sum as u16)
-    }
-
-    // one_complement_sum() function
-    /// returns all-zeros if checksum is valid
-    pub fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
-    {
-        let mut sum = 0u32;
-        let mut idx = 0;
-
-        while idx < data.len() {
-            if let Some(p) = pos {
-                if idx == p {
-                    idx = p + 2; // skip 2 bytes
-                }
-                // if we reach the end of slice, we are done
-                if idx == data.len() {
-                    break;
-                }
-            };
-            let word = (data[idx] as u32) << 8 | data[idx + 1] as u32;
-            sum += word;
-            idx += 2;
-        }
-
-        while sum >> 16 != 0 {
-            sum = (sum >> 16) + (sum & 0xFFFF);
-        }
-
-        !sum as u16
-    }
-
 }

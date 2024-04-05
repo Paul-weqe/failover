@@ -1,2 +1,2 @@
-pub mod handlers;
-pub mod generators;
+pub(crate) mod handlers;
+pub(crate) mod generators;

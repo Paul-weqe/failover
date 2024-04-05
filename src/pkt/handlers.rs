@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::{network, pkt::generators, state_machine::Event};
+use crate::{checksum, pkt::generators, state_machine::Event};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
     ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
@@ -13,19 +13,19 @@ use crate::{
     base_functions::{create_datalink_channel, get_interface}
 };
 
-// pub fn handle_incoming_arp_pkt(packet: &ArpPacket, vrouter: &VirtualRouter) {
-pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
 
-    let mut_router = vrouter.lock().await;
-    let interface = get_interface(&mut_router.network_interface);
+pub(crate) async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
+
+    let vrouter = vrouter.lock().await;
+    let interface = get_interface(&vrouter.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
     
-    match mut_router.fsm.state {
+    match vrouter.fsm.state {
         States::Init => {}
         States::Backup => {
             // MUST NOT respond to ARP requests for the IP address(s) associated 
             // with the virtual router.
-            for ip in &mut_router.ip_addresses {
+            for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
                     return 
                 }
@@ -34,15 +34,15 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
             // !TODO
             // MUST discard packets with a destination link layer MAC address
             // equal to the virtual router MAC address.
-            // if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
-            //     return
-            // }
+            if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
+                return
+            }
         }
 
         States::Master => {
             // MUST respond to ARP requests for the IP address(es) associated
             // with the virtual router.
-            for ip in &mut_router.ip_addresses {
+            for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
                     let (mut sender, _) = create_datalink_channel(&interface);
 
@@ -75,8 +75,7 @@ pub async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vroute
     }
 }
 
-// pub fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket, vrouter: Arc<Mutex<VirtualRouter>>)
-pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) 
+pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) 
 {
 
     let mut vrouter = vrouter_mutex.lock().await;
@@ -124,7 +123,7 @@ pub async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
 
                     let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
                     let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
-                    outgoing_vrrp_packet.set_checksum(network::checksum::one_complement_sum(outgoing_vrrp_packet.packet(), Some(6)));
+                    outgoing_vrrp_packet.set_checksum(checksum::one_complement_sum(outgoing_vrrp_packet.packet(), Some(6)));
 
                     let ip_len = vrrp_packet.packet().len() + 20;
                     let mut ip_buff: Vec<u8> = vec![0; ip_len];
