@@ -91,8 +91,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
     // if it is the help request
     if args[1..].contains(&"--help".to_string()) {
-        let help_format = format!("
-        
+        let help_format = "
         Failover Usage:
             # running failover, we take configs either from a json file or from the cli   
             CONFIG
@@ -125,7 +124,8 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
             sudo ./failover --teardown
 
-        ");
+        ".to_string();
+        
         println!("{}", opts.usage(&help_format));
         std::process::exit(1);
     }
