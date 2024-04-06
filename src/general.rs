@@ -33,7 +33,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         "A", 
         "action", 
         "action that will be done to the addresses on the interface configured. Default is 'run'", 
-        "(--action startup / --action teardown / --action run)");
+        "(--action setup / --action teardown / --action run)");
 
     // name
     opts.optopt(
@@ -86,13 +86,47 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         "f", 
         "file", 
         "the json file with the necessary configurations. Default is 'vrrp-config.json'", 
-    "(--file vrrp-config.json)");
+    "(--file FILENAME)");
 
 
     // if it is the help request
     if args[1..].contains(&"--help".to_string()) {
-        println!("HELP");
-        println!("{}", opts.usage("Failover Usage: \n"));
+        let help_format = format!("
+        
+        Failover Usage:
+            # running failover, we take configs either from a json file or from the cli   
+            CONFIG
+            ======
+
+            FILE CONFIG MODE
+            ----------------
+            ./failover --file custom-vrrp-config.json
+
+            CLI CONFIG MODE 
+            ---------------
+            ./failover --cli --iface wlo1 --priority 101 --adv-interval 1 --preempt-mode false
+
+            DEFAULT
+            -------
+            ./failover 
+            # if neither 'file' not 'cli' is specified, failover chooses 'file' by default. 
+            # The file that is used for configs is './vrrp-config.json' in the same 
+            # directory where failover is being run from (TODO: to change this to relevant config file in /etc directory).
+
+            ACTIONS
+            =======
+            # Three actions can be run: 'setup', 'teardown' or 'run'. 
+            # 'run'. setup and teardown must be run with superuser persmissions 
+            # since they are used to add an IP and remove an IP from an interface
+            sudo ./failover --setup
+            
+            # can also be called without --run
+            ./failover --run 
+
+            sudo ./failover --teardown
+
+        ");
+        println!("{}", opts.usage(&help_format));
         std::process::exit(1);
     }
 
@@ -134,12 +168,12 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         match matches.opt_str("action") {
             Some(x) => {
 
-                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
-                    let action_cmd = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
+                if ["setup", "teardown"].contains(&x.to_lowercase().as_str()){
+                    let action_cmd = if x.to_lowercase().as_str() == "setup" { "add" } else { "delete" };
                     virtual_address_action(action_cmd, &cli_config.ip_addresses, &cli_config.interface_name);
                     std::process::exit(1);
                 } else {
-                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'. If none is specified, run will be default.".into()));
+                    return Result::Err(OptError("--action has to be ether 'setup', 'teardown' or 'run'. If none is specified, run will be default.".into()));
                 }
             }
             None => {
@@ -162,12 +196,12 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
         match matches.opt_str("action") {
             Some (x) => {
-                if ["startup", "teardown"].contains(&x.to_lowercase().as_str()){
-                    let action = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
+                if ["setup", "teardown"].contains(&x.to_lowercase().as_str()){
+                    let action = if x.to_lowercase().as_str() == "setup" { "add" } else { "delete" };
                     virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
                     std::process::exit(1);
                 } else if !["run"].contains(&x.to_lowercase().as_str()) {
-                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run' ".into()));
+                    return Result::Err(OptError("--action has to be ether 'setup', 'teardown' or 'run' ".into()));
                 } else {
                     Ok(file_config)
                 }

@@ -20,48 +20,61 @@ pub async fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
     let vrouter = Arc::new(Mutex::new(vrouter));
     let pkt_generator = generators::MutablePktGenerator::new( interface.clone() );
 
-    // we will have already added our second IP address
-    if interface.ips.len() <= 1 {
-        log::error!("Interface {} does not have any valid IP addresses", interface.name);
-        return Result::Err(
-            NetError(format!("Interface {} does not have any valid IP addresses", interface.name))
-        );
-    }
 
-    let timers_process = timers_listener(
-        pkt_generator.clone(), 
-        create_datalink_channel(&interface), 
-        Arc::clone(&vrouter));
+    // wait for when either MasterDownTimer or AdvertTimer is reached to 
+    // carry out necessary actions. 
+    let timers_process = tokio::spawn(
+        timers_listener(
+            pkt_generator.clone(), 
+            create_datalink_channel(&interface), 
+            Arc::clone(&vrouter)
+        )
+    );
 
     // async process listens for any incoming network requests
-    let network_process = network_listener(
-        create_datalink_channel(&interface), 
-    Arc::clone(&vrouter));
+    let network_process = tokio::spawn(
+        network_listener(
+            create_datalink_channel(&interface), 
+        Arc::clone(&vrouter)
+        )
+    );
 
     // listen for any events happening to the vrouter
-    let event_process = event_listener(
-        pkt_generator.clone(), 
-        create_datalink_channel(&interface), 
-        Arc::clone(&vrouter));
-
+    let event_process = tokio::spawn(
+        event_listener(
+            pkt_generator.clone(), 
+            create_datalink_channel(&interface), 
+            Arc::clone(&vrouter)
+        )
+    );
+    
     let _ = tokio::join!(
-        network_process, 
         event_process,
+        network_process, 
         timers_process
     );
     Ok(())
 }
 
+
+/// Listens for when any Event occurs in the Virtual Router. 
+/// Events that can occur are: Startup,  Shutdown, MasterDown, Null  
+/// Actions happening on when each of these Events is fired are
+/// Specified in RFC 3768 section 6.3, 6.4 and 6.5
 async fn event_listener(
     generator: MutablePktGenerator, 
     (mut sender, _receiver): (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>),
     vrouter: Arc<Mutex<VirtualRouter>>
 ){
     loop {
-
+        
         let mut vrouter = vrouter.lock().await;
         match &vrouter.fsm.event {
             
+            // Startup actions specified in section 6.4.1 of RFC 3768
+            // this Event is called when the router is initialized and 
+            // the state machine is in Init mode. Is default when Vrouter is 
+            // started. 
             Event::Startup => {
                 if vrouter.fsm.state == States::Init {
                     if vrouter.priority == 255 {
@@ -125,6 +138,8 @@ async fn event_listener(
                 }
             }
 
+            // Can be called when the Virtual Rotuer is in the Backup Mode.
+            // Actions covered in RFC 3768 section 6.4.2
             Event::Shutdown => {
                 match vrouter.fsm.state {
                     States::Backup => {
@@ -159,7 +174,10 @@ async fn event_listener(
                     States::Init => {}
                 }
             }
-
+            
+            // Is when the router is in Backup mode and the master has not sent 
+            // any VRRP ADVERTISEMENT for the period set by the 'Master Down Timer'. 
+            //  
             Event::MasterDown => {
                 if vrouter.fsm.state == States::Backup {
                     // send ADVERTIEMENT then send gratuitous ARP 
