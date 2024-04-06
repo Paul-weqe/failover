@@ -1,6 +1,6 @@
 use failover::{
-    general::parse_cli_opts,
-    converter, network
+    general::{parse_cli_opts, config_to_vr},
+    network
 };
 use std::env;
 use simple_logger::SimpleLogger;
@@ -18,13 +18,13 @@ async fn main(){
             panic!("{err}");
         }
     };
-    let vr = converter::config_to_vr(config);
+    let vr = config_to_vr(config);
     let init_network_process = network::run_vrrp(vr);
     init_network_process.await.unwrap_or_else(|err| {
         log::error!("Problem running VRRP process");
         panic!("{err}");
     });
-
+    
 }
 
 

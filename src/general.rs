@@ -1,9 +1,9 @@
 
-use std::{error::Error, fs::File, io::BufReader, path::Path, process::Command};
-use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError};
+use std::{error::Error, fs::File, io::BufReader, path::Path, process::Command, str::FromStr};
+use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
-
+use ipnet::Ipv4Net;
 
 pub(crate) fn get_interface(name: &str) -> NetworkInterface {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
@@ -20,6 +20,45 @@ pub(crate) fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn
             panic!("ERROR: {err}")
         }
     }
+}
+
+// takes the configs that have been received and converts them 
+// into a virtual router instance. 
+pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
+
+    // SKEW TIME = (256 * priority) / 256
+    let skew_time: f32 = (256_f32 - conf.priority() as f32) / 256_f32;
+    
+    // MASTER DOWN INTERVAL = (3 * ADVERTISEMENT INTERVAL ) + SKEW TIME 
+    let master_down_interval: f32 = (3_f32 * conf.advert_interval() as f32) + skew_time;
+    
+    let mut ips: Vec<Ipv4Net> = vec![];
+    for ip_config in &conf.ip_addresses() {
+        match Ipv4Net::from_str(ip_config) {
+            Ok(ip_addr) => ips.push(ip_addr),
+            Err(err) => {
+                log::error!("Address '{:?}' not in the correct format", &ip_config);
+                panic!("Error: {err}");
+            }
+        }
+    }
+    
+    log::info!("({}) Setting up.", conf.name());
+    let vr = VirtualRouter {
+        name: conf.name().clone(),
+        vrid: conf.vrid(),
+        ip_addresses: ips,
+        priority: conf.priority(),
+        skew_time,
+        advert_interval: conf.advert_interval(),
+        master_down_interval,
+        preempt_mode: conf.preempt_mode(),
+        network_interface: conf.interface_name().clone(),
+        fsm: VirtualRouterMachine::default()
+    };
+    log::info!("({}) Entered {:?} state.", vr.name, vr.fsm.state);
+    vr
+
 }
 
 
