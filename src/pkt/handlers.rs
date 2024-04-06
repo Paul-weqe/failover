@@ -12,7 +12,7 @@ use vrrp_packet::VrrpPacket;
 use crate::{ 
     router::VirtualRouter, 
     state_machine::States,
-    base_functions::{create_datalink_channel, get_interface}
+    general::{create_datalink_channel, get_interface}
 };
 
 
@@ -37,7 +37,6 @@ pub(crate) async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>,
             // MUST discard packets with a destination link layer MAC address
             // equal to the virtual router MAC address.
             if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
-                return
             }
         }
 
@@ -109,7 +108,7 @@ pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>
         // 4. MUST verify the VRRP checksum.
         //      rfc1071() function should return value with all 1's
         let check = checksum::confirm_checksum(vrrp_packet.packet());
-        if format!("{:b}", check).contains("0") {
+        if format!("{:b}", check).contains('0') {
             error = format!("({}) invalid checksum from {:?}", vrouter.name, ip_packet.get_source());
             log::error!("{error}");
             return Result::Err(NetError(error));
@@ -161,7 +160,7 @@ pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>
         let mut addr: Vec<u8> = vec![];
         for (counter, octet) in vrrp_packet.get_ip_addresses().iter().enumerate() {
             addr.push(*octet);
-            if counter + 1 % 4 == 0 {
+            if (counter + 1) % 4 == 0 {
                 let ip = Ipv4Net::new(
                     Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), 24
                 ).unwrap().addr();
@@ -279,7 +278,7 @@ pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>
         }
     } else {
         Result::Err(NetError(
-            format!("")
+            String::new()
         ))
     }
 

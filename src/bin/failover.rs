@@ -1,5 +1,5 @@
 use failover::{
-    base_functions::parse_cli_opts,
+    general::parse_cli_opts,
     converter, network
 };
 use std::env;

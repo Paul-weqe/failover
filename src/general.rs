@@ -102,39 +102,33 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     };
 
     if matches.opt_str("cli").is_some() {
-
-        let mut cli_config = CliConfig::default();
-        cli_config.name = match matches.opt_str("name") {
-            Some(x) => x,
-            None => return Result::Err(OptError("instance name '--name' is a mandatory field".into()))
-        };
-    
-        cli_config.vrid = match matches.opt_str("vrid") {
-            Some(x) => x.parse::<u8>().unwrap(),
-            None => return Result::Err(OptError("VRID '--vrid' is a mandatory field".into()))
-        };
-    
-        cli_config.interface_name = match matches.opt_str("iface") {
-            Some(x) => x,
-            None => return Result::Err(OptError("interface name '--iface' is a mandatory field".into()))
-        };
-    
-        for addr in matches.opt_strs("ip-address") {
-            cli_config.ip_addresses.push(addr);
-        }
-    
-        cli_config.priority = match matches.opt_str("priority") {
-            Some(x) => x.parse::<u8>().unwrap(),
-            None => cli_config.priority
-        };
-    
-        cli_config.advert_interval = match matches.opt_str("adv-interval") {
-            Some(x) => x.parse::<u8>().unwrap(),
-            None => cli_config.advert_interval
-        };
-        cli_config.preempt_mode = match matches.opt_str("preempt-mode") {
-            Some (x) => x.parse::<bool>().unwrap(),
-            None => cli_config.preempt_mode
+        
+        let cli_config = CliConfig {
+            name: match matches.opt_str("name") {
+                Some(x) => x,
+                None => return Result::Err(OptError("instance name '--name' is a mandatory field".into()))
+            },
+            vrid: match matches.opt_str("vrid") {
+                Some(x) => x.parse::<u8>().unwrap(),
+                None => return Result::Err(OptError("VRID '--vrid' is a mandatory field".into()))
+            },
+            interface_name: match matches.opt_str("iface") {
+                Some(x) => x,
+                None => return Result::Err(OptError("interface name '--iface' is a mandatory field".into()))
+            },
+            ip_addresses: matches.opt_strs("ip-address"),
+            priority: match matches.opt_str("priority") {
+                Some(x) => x.parse::<u8>().unwrap(),
+                None => CliConfig::default().priority
+            },
+            advert_interval: match matches.opt_str("adv-interval") {
+                Some(x) => x.parse::<u8>().unwrap(),
+                None => CliConfig::default().advert_interval
+            },
+            preempt_mode: match matches.opt_str("preempt-mode") {
+                Some (x) => x.parse::<bool>().unwrap(),
+                None => CliConfig::default().preempt_mode
+            }
         };
 
         match matches.opt_str("action") {
@@ -144,20 +138,19 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
                     let action_cmd = if x.to_lowercase().as_str() == "startup" { "add" } else { "delete" };
                     virtual_address_action(action_cmd, &cli_config.ip_addresses, &cli_config.interface_name);
                     std::process::exit(1);
-                } 
-                // else if !["run"].contains(&x.to_lowercase().as_str()) 
-                else {
-                    println!("ACTION: {:?}", &x.to_lowercase());
-                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
+                } else {
+                    return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'. If none is specified, run will be default.".into()));
                 }
             }
             None => {
-
-                // return Result::Err(OptError("--action has to be ether 'startup', 'teardown' or 'run'".into()));
+                // should have 'run' as action by default if nothing is specified.  
             }
         }
-        return Ok(VrrpConfig::Cli(cli_config));
+
+
+        Ok(VrrpConfig::Cli(cli_config))
     } else {
+
         let filename = if matches.opt_str("file").is_some() { matches.opt_str("file").unwrap() } else { "vrrp-config.json".to_string() };
         let file_config = match read_config_from_json_file(&filename) {
             Ok(config) => VrrpConfig::File(config),
