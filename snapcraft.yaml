@@ -1,0 +1,47 @@
+name: failover
+version: git
+summary: A rust implementation of VRRP
+description: |
+  #   Failover Usage:
+  # running failover, we take configs either from a json file or from the cli   
+  CONFIG
+  ======
+
+  FILE CONFIG MODE
+  ----------------
+  ./failover --file custom-vrrp-config.json
+
+  CLI CONFIG MODE 
+  ---------------
+  ./failover --cli --iface wlo1 --priority 101 --adv-interval 1 --preempt-mode false
+
+  DEFAULT
+  -------
+  ./failover 
+  # if neither 'file' not 'cli' is specified, failover chooses 'file' by default. 
+  # The file that is used for configs is './vrrp-config.json' in the same 
+  # directory where failover is being run from (TODO: to change this to relevant config file in /etc directory).
+
+  ACTIONS
+  =======
+  # Three actions can be run: 'setup', 'teardown' or 'run'. 
+  # 'run'. setup and teardown must be run with superuser persmissions 
+  # since they are used to add an IP and remove an IP from an interface
+  sudo ./failover --setup
+  
+  # can also be called without --run
+  ./failover --run 
+
+  sudo ./failover --teardown
+
+confinement: devmode
+base: core22
+
+parts:
+  failover:
+    plugin: rust
+    source: .
+
+apps:
+  failover:
+    command: bin/failover
