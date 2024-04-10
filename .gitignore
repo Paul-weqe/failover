@@ -1,3 +1,4 @@
 /target
 src/bin/trial.rs
 *.snap
+build.sh

@@ -166,7 +166,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         ".to_string();
         
         println!("{}", opts.usage(&help_format));
-        std::process::exit(1);
+        std::process::exit(0);
     }
 
     let matches = match opts.parse(&args[1..]) {
@@ -210,7 +210,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
                 if ["setup", "teardown"].contains(&x.to_lowercase().as_str()){
                     let action_cmd = if x.to_lowercase().as_str() == "setup" { "add" } else { "delete" };
                     virtual_address_action(action_cmd, &cli_config.ip_addresses, &cli_config.interface_name);
-                    std::process::exit(1);
+                    std::process::exit(0);
                 } else {
                     return Result::Err(OptError("--action has to be ether 'setup', 'teardown' or 'run'. If none is specified, run will be default.".into()));
                 }
@@ -224,7 +224,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         Ok(VrrpConfig::Cli(cli_config))
     } else {
 
-        let filename = if matches.opt_str("file").is_some() { matches.opt_str("file").unwrap() } else { "vrrp-config.json".to_string() };
+        let filename = if matches.opt_str("file").is_some() { matches.opt_str("file").unwrap() } else { "/home/waswa/vrrp-config.json".to_string() };
         let file_config = match read_config_from_json_file(&filename) {
             Ok(config) => VrrpConfig::File(config),
             Err(err) => {
@@ -238,7 +238,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
                 if ["setup", "teardown"].contains(&x.to_lowercase().as_str()){
                     let action = if x.to_lowercase().as_str() == "setup" { "add" } else { "delete" };
                     virtual_address_action(action, &file_config.ip_addresses(), &file_config.interface_name());
-                    std::process::exit(1);
+                    std::process::exit(0);
                 } else if !["run"].contains(&x.to_lowercase().as_str()) {
                     return Result::Err(OptError("--action has to be ether 'setup', 'teardown' or 'run' ".into()));
                 } else {
@@ -255,12 +255,14 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
 fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
 {
+    log::info!("ADDRESSES!!!");
     for addr in addresses {
         let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];
         let _ = Command::new("sudo")
             .args(cmd_args)
             .output();
     }
+    log::info!("ADDRESS FINISHED");
 }
 
 

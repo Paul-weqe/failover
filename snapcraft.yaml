@@ -43,5 +43,13 @@ parts:
     source: .
 
 apps:
-  failover:
+  main:
     command: bin/failover
+    daemon: simple 
+    before:
+    - setup
+    post-stop-command: bin/failover --action teardown
+
+  setup:
+    command: bin/failover --action setup
+    daemon: oneshot
