@@ -18,11 +18,19 @@ pub struct VirtualRouter {
 }
 
 impl VirtualRouter {
-    pub fn ipv4_addresses(&self) -> Vec<Ipv4Addr> {
+    pub(crate) fn ipv4_addresses(&self) -> Vec<Ipv4Addr> {
         let mut addrs: Vec<Ipv4Addr> = vec![];
         for a in self.ip_addresses.iter() {
             addrs.push(a.addr());
         }
         addrs
     }
+
+    pub(crate) fn str_ipv4_addresses(&self) -> Vec<String> {
+        let mut addrs: Vec<String> = vec![];
+        for a in self.ip_addresses.iter() {
+            addrs.push(a.to_string());
+        }
+        addrs
+    } 
  }

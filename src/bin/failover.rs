@@ -18,6 +18,7 @@ fn main(){
         }
     };
     let vr = config_to_vr(config);
+
     let init_network_process = network::run_vrrp(vr);
     init_network_process.unwrap_or_else(|err| {
         log::error!("Problem running VRRP process");

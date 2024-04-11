@@ -253,7 +253,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     } 
 }
 
-fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
+pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
 {
     for addr in addresses {
         let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];

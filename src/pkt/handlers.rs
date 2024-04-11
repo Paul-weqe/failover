@@ -2,7 +2,7 @@ use core::f32;
 use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;
 
-use crate::{checksum, error::NetError, pkt::generators, state_machine::Event};
+use crate::{checksum, error::NetError, general::virtual_address_action, pkt::generators, state_machine::Event};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
     ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
@@ -207,6 +207,7 @@ pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrou
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                 }
                 else if vrouter.priority > vrrp_packet.get_priority() {
+                    virtual_address_action("add", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
                     vrouter.fsm.state = States::Master;
                     let advert_interval = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_interval);
@@ -254,6 +255,8 @@ pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrou
                 
                 else if adv_priority_gt_local_priority 
                 {
+                    // delete virtual IP address
+                    virtual_address_action("delete", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
                     let m_down_interval = vrouter.master_down_interval as f32;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;
@@ -263,6 +266,8 @@ pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrou
                 }
                 else if adv_priority_eq_local_priority {
 
+                    // delete virtual IP address
+                    virtual_address_action("delete", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
                     let m_down_interval = vrouter.master_down_interval as f32;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;

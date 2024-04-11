@@ -53,7 +53,6 @@ pub enum VrrpConfig {
     Cli(CliConfig)
 }
 
-// impl BaseConfig for 
 impl VrrpConfig {
     pub fn name(&self) -> String {
         match self { 
