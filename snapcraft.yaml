@@ -1,5 +1,5 @@
 name: failover
-version: '0.1.0'
+version: '0.2.0'
 summary: A rust implementation of VRRP
 description: |
   #   Failover Usage:
@@ -35,7 +35,7 @@ description: |
   sudo ./failover --teardown
 
 grade: stable
-confinement: devmode
+confinement: classic
 base: core22
 
 parts:

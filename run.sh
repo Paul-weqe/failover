@@ -1,9 +1,9 @@
 #!/bin/bash 
 
 cargo build 
-sudo ./target/debug/failover --file sample-vrrp-config.json --action setup
-sudo ./target/debug/failover --file sample-vrrp-config.json
+sudo ./target/debug/failover 
+sudo ./target/debug/failover
 pid=$!
 wait $pid
-sudo ./target/debug/failover --file sample-vrrp-config.json --action teardown
+sudo ./target/debug/failover --action teardown 
 

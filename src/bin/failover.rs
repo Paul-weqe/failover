@@ -16,13 +16,10 @@ fn main(){
     };
     let vr = config_to_vr(config);
 
-    let _ = failover::run(vr).unwrap_or_else(|err| {
+    failover::run(vr).unwrap_or_else(|err| {
         log::error!("Problem running VRRP process");
         panic!("{err}");
     });
     
 }
-
-
-
 

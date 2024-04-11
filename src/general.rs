@@ -1,5 +1,5 @@
 
-use std::{error::Error, fs::File, io::BufReader, path::Path, process::Command, str::FromStr};
+use std::{error::Error, fs::{create_dir, File}, io::{BufReader, Write}, path::Path, process::Command, str::FromStr};
 use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
@@ -72,7 +72,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         "A", 
         "action", 
         "action that will be done to the addresses on the interface configured. Default is 'run'", 
-        "(--action setup / --action teardown / --action run)");
+        "(--action teardown / --action run)");
 
     // name
     opts.optopt(
@@ -124,7 +124,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
     opts.optopt(
         "f", 
         "file", 
-        "the json file with the necessary configurations. Default is 'vrrp-config.json'", 
+        "the json file with the necessary configurations. By default will be looked for at: '/etc/vrrp-config.json'", 
     "(--file FILENAME)");
 
 
@@ -153,10 +153,9 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
             ACTIONS
             =======
-            # Three actions can be run: 'setup', 'teardown' or 'run'. 
-            # 'run'. setup and teardown must be run with superuser persmissions 
-            # since they are used to add an IP and remove an IP from an interface
-            sudo ./failover --setup
+            # Two actions can be run: 'teardown' or 'run'. 
+            # 'run' is default if no actions are specified. 
+            sudo ./failover --teardown
             
             # can also be called without --run
             ./failover --run 
@@ -207,12 +206,11 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         match matches.opt_str("action") {
             Some(x) => {
 
-                if ["setup", "teardown"].contains(&x.to_lowercase().as_str()){
-                    let action_cmd = if x.to_lowercase().as_str() == "setup" { "add" } else { "delete" };
-                    virtual_address_action(action_cmd, &cli_config.ip_addresses, &cli_config.interface_name);
+                if ["teardown"].contains(&x.to_lowercase().as_str()){
+                    virtual_address_action("delete", &cli_config.ip_addresses, &cli_config.interface_name);
                     std::process::exit(0);
                 } else {
-                    return Result::Err(OptError("--action has to be ether 'setup', 'teardown' or 'run'. If none is specified, run will be default.".into()));
+                    return Result::Err(OptError("--action has to be ether 'setup', or 'run'. If none is specified, run will be default.".into()));
                 }
             }
             None => {
@@ -224,7 +222,28 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         Ok(VrrpConfig::Cli(cli_config))
     } else {
 
-        let filename = if matches.opt_str("file").is_some() { matches.opt_str("file").unwrap() } else { "/home/waswa/vrrp-config.json".to_string() };
+        let filename = if matches.opt_str("file").is_some() { 
+            matches.opt_str("file").unwrap() 
+        } else {
+            let _ = create_dir("/etc/failover/");
+            if !Path::new("/etc/failover/vrrp-config.json").exists() {
+                let mut file = File::create("/etc/failover/vrrp-config.json").unwrap();
+                let _ = file.write_all(b"
+                {
+                    \"name\": \"VR_1\",
+                    \"vrid\": 51,
+                    \"interface_name\": \"wlo1\",
+                    \"ip_addresses\": [ 
+                        \"192.168.100.100/24\"
+                    ],
+                    \"priority\": 101,
+                    \"advert_interval\": 1,
+                    \"preempt_mode\": true
+                }
+                ");
+            }
+            "/etc/failover/vrrp-config.json".to_string() 
+        };
         let file_config = match read_config_from_json_file(&filename) {
             Ok(config) => VrrpConfig::File(config),
             Err(err) => {
@@ -256,8 +275,11 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
 {
     for addr in addresses {
-        let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];
-        let _ = Command::new("sudo")
+        // let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];
+        // let _ = Command::new("sudo")
+
+        let cmd_args = vec!["address", action, &addr, "dev", interface_name];
+        let _ = Command::new("ip")
             .args(cmd_args)
             .output();
     }

@@ -25,7 +25,7 @@ use crate::{
 };
 
 
-pub(crate) fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
+pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: Arc<Mutex<VirtualRouter>>) {
 
     let vrouter = vrouter.lock().unwrap();
     let interface = get_interface(&vrouter.network_interface);
@@ -85,7 +85,7 @@ pub(crate) fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrout
     }
 }
 
-pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> Result<(), NetError>{
+pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> Result<(), NetError>{
 
     let mut vrouter = vrouter_mutex.lock().unwrap();
     let interface = get_interface(&vrouter.network_interface);
@@ -266,7 +266,7 @@ pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrou
                 {
                     // delete virtual IP address
                     virtual_address_action("delete", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
-                    let m_down_interval = vrouter.master_down_interval as f32;
+                    let m_down_interval = vrouter.master_down_interval;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;
                     vrouter.fsm.event = Event::Null;
@@ -277,7 +277,7 @@ pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrou
 
                     // delete virtual IP address
                     virtual_address_action("delete", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
-                    let m_down_interval = vrouter.master_down_interval as f32;
+                    let m_down_interval = vrouter.master_down_interval;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;
                     vrouter.fsm.event = Event::Null;

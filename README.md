@@ -1,5 +1,5 @@
 # Failover
-Failover is a VRRP implementation currently configured for debian instances. 
+Failover is a VRRP implementation currently configured for debian instances.
 
 ## Config 
 The following are the configurations that can be made on a <u>Failover</u> Virtual Router:
@@ -43,13 +43,13 @@ To use this file as the configuration for our failover instance, we will run:
 ```
 
 ### Default config 
-When run without a `--file [FILENAME]` nor `--cli [ARGS]` specified, the `vrrp-config.json` file will be used by default as the configuration file. 
+When run without a `--file [FILENAME]` nor `--cli [ARGS]` specified, the `/etc/failover/vrrp-config.json` file will be used by default as the configuration file. 
 
 Can be run with:
 ```sh
 ./failover
 ```
-This will automatically look into your `vrrp-config.json` file and use its parameters as the config 
+This will automatically look into your `/etc/failover/vrrp-config.json` file and use its parameters as the config 
 for the virtual router we are going to create. 
 
 To look into how the JSON configs, look in the File Config section. 
