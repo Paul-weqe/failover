@@ -1,3 +1,12 @@
+/// Defines how each different type of packet should be handled. 
+/// Depending on the current state of the machine. 
+/// The two main packets being anticipated are:
+///     - VRRP packets
+///     - ARP packets
+/// 
+/// The actions on each of the above are specified in section
+/// 6 of RFC 3768. 
+/// 
 use core::f32;
 use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;

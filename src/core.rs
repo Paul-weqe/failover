@@ -1,56 +1,32 @@
-use std::{sync::{Arc, Mutex}, thread, time::Instant};
+/// This is the main file for the processes being run. 
+/// There are three functions holding these processes 
+/// functions that are to be run:
+///     - Network Process (pub(crate) fn network_process)
+///     - Event Process (pub(crate) fn event_process)
+///     - Timer Process (pub(crate) fn timer_process)
+/// 
+/// Each of the above will be run on a thread of their own. 
+/// Avoided using async since they were only three separate threads needed. 
+/// 
+/// 
+
+use std::{sync::Arc, time::Instant};
 use pnet::packet::{
     ethernet::{ EtherTypes, EthernetPacket }, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
 use crate::{
-    error::NetError, general::{create_datalink_channel, get_interface, virtual_address_action}, 
-    pkt::{generators::{self, MutablePktGenerator}, 
-    handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}}, 
-    router::VirtualRouter, state_machine::{Event, States}
+    general::{create_datalink_channel, virtual_address_action}, 
+    pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt}, 
+    state_machine::{Event, States}
 };
 use crate::checksum;
 
 
-
-#[derive(Clone)]
-struct TaskItems {
-    vrouter: Arc<Mutex<VirtualRouter>>,
-    generator: MutablePktGenerator
-}
-
-/// initiates the network functions across the board. 
-/// from interfaces, channels, packet handling etc...
-pub fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
-
-    let interface = get_interface(&vrouter.network_interface);
-
-    let items = TaskItems {
-        vrouter: Arc::new(Mutex::new(vrouter)),
-        generator: generators::MutablePktGenerator::new(interface.clone())
-    };
-
-    // sync process listens for any incoming network requests
-    let network_items = items.clone();
-    let network_process = thread::spawn(move || { network_waiter(network_items) });
-
-    // wait for when either MasterDownTimer or AdvertTimer is reached to 
-    // carry out necessary actions. 
-    let timers_items = items.clone();
-    let timers_process = thread::spawn( move || { timers_listener(timers_items) });
-
-    // listen for any events happening to the vrouter
-    let event_items = items.clone();
-    let event_process = thread::spawn( move || { event_listener(event_items); });
-    
-    network_process.join().unwrap();
-    timers_process.join().unwrap();
-    event_process.join().unwrap();
-    
-    Ok(())
-}
-
-
-fn network_waiter(items: TaskItems) {
+/// Waits for network connections and does the necessary actions. 
+/// Acts on the queries mostly described from the state machine 
+/// in chapter 6.3 onwards ofRFC 3768
+pub(crate) fn network_process(items: crate::TaskItems) {
+    // NetworkInterface
     let interface = items.generator.interface;
     let (_sender, mut receiver) = create_datalink_channel(&interface);
     let vrouter = items.vrouter;
@@ -94,11 +70,72 @@ fn network_waiter(items: TaskItems) {
 }
 
 
+/// Used to track the various timers: (MasterDownTimer and Advertimer)
+/// Has been explained in RFC 3768 section 6.2
+pub(crate) fn timer_process(items: crate::TaskItems) {
+
+    let generator = items.generator;
+    let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
+    let vrouter = items.vrouter;
+
+    loop {
+        let mut vrouter = vrouter.lock().unwrap();
+        let timer = vrouter.fsm.timer;
+
+        match timer.t_type {
+            crate::state_machine::TimerType::MasterDown => {
+
+                if Instant::now() > vrouter.fsm.timer.waiting_for.unwrap() {
+                    virtual_address_action("add", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
+                    vrouter.fsm.state = States::Master;
+                    log::info!("({}) transitioned to MASTER(init)", vrouter.name);
+                    let advert_interval = vrouter.advert_interval as f32;
+                    vrouter.fsm.set_advert_timer(advert_interval);
+                }
+
+            }
+
+            crate::state_machine::TimerType::Adver => {
+                
+                if Instant::now() > vrouter.fsm.timer.waiting_for.unwrap() {
+                    // VRRP pakcet
+                    let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
+                    let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
+                    vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
+                    
+                    // // IP packet
+                    let ip_len = vrrp_packet.packet().len() + 20;
+                    let mut ip_buff: Vec<u8> = vec![0; ip_len];
+                    let mut ip_packet = generator.gen_vrrp_ip_header(&mut ip_buff);
+                    ip_packet.set_payload(vrrp_packet.packet());
+
+                    // // Ethernet packet
+                    let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
+                    let mut ether_packet = generator.gen_vrrp_eth_packet(&mut eth_buffer);
+                    ether_packet.set_payload(ip_packet.packet());  
+                    sender
+                        .send_to(ether_packet.packet(), None)
+                        .unwrap()
+                        .unwrap();
+
+                    let advert_time = vrouter.advert_interval as f32;
+                    vrouter.fsm.set_advert_timer(advert_time);
+                }
+                // timer_vrouter.fsm.reduce_timer();
+            }
+
+            crate::state_machine::TimerType::Null =>  {
+                
+            }
+        }
+    }
+}
+
 /// Listens for when any Event occurs in the Virtual Router. 
 /// Events that can occur are: Startup,  Shutdown, MasterDown, Null  
 /// Actions happening on when each of these Events is fired are
 /// Specified in RFC 3768 section 6.3, 6.4 and 6.5
-fn event_listener( items: TaskItems ){
+pub(crate) fn event_process( items: crate::TaskItems ){
     let generator = items.generator;
     let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
     let vrouter = items.vrouter;
@@ -278,61 +315,3 @@ fn event_listener( items: TaskItems ){
     }
 }
 
-fn timers_listener(items: TaskItems) {
-
-    let generator = items.generator;
-    let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
-    let vrouter = items.vrouter;
-
-    loop {
-        let mut vrouter = vrouter.lock().unwrap();
-        let timer = vrouter.fsm.timer;
-
-        match timer.t_type {
-            crate::state_machine::TimerType::MasterDown => {
-
-                if Instant::now() > vrouter.fsm.timer.waiting_for.unwrap() {
-                    virtual_address_action("add", &vrouter.str_ipv4_addresses(), &vrouter.network_interface);
-                    vrouter.fsm.state = States::Master;
-                    log::info!("({}) transitioned to MASTER(init)", vrouter.name);
-                    let advert_interval = vrouter.advert_interval as f32;
-                    vrouter.fsm.set_advert_timer(advert_interval);
-                }
-
-            }
-
-            crate::state_machine::TimerType::Adver => {
-                
-                if Instant::now() > vrouter.fsm.timer.waiting_for.unwrap() {
-                    // VRRP pakcet
-                    let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                    let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
-                    vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
-                    
-                    // // IP packet
-                    let ip_len = vrrp_packet.packet().len() + 20;
-                    let mut ip_buff: Vec<u8> = vec![0; ip_len];
-                    let mut ip_packet = generator.gen_vrrp_ip_header(&mut ip_buff);
-                    ip_packet.set_payload(vrrp_packet.packet());
-
-                    // // Ethernet packet
-                    let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
-                    let mut ether_packet = generator.gen_vrrp_eth_packet(&mut eth_buffer);
-                    ether_packet.set_payload(ip_packet.packet());  
-                    sender
-                        .send_to(ether_packet.packet(), None)
-                        .unwrap()
-                        .unwrap();
-
-                    let advert_time = vrouter.advert_interval as f32;
-                    vrouter.fsm.set_advert_timer(advert_time);
-                }
-                // timer_vrouter.fsm.reduce_timer();
-            }
-
-            crate::state_machine::TimerType::Null =>  {
-                
-            }
-        }
-    }
-}
