@@ -5,8 +5,7 @@ use failover::{
 use std::env;
 use simple_logger::SimpleLogger;
 
-#[tokio::main]
-async fn main(){
+fn main(){
 
     SimpleLogger::new().with_colors(true).init().unwrap();
     
@@ -20,7 +19,7 @@ async fn main(){
     };
     let vr = config_to_vr(config);
     let init_network_process = network::run_vrrp(vr);
-    init_network_process.await.unwrap_or_else(|err| {
+    init_network_process.unwrap_or_else(|err| {
         log::error!("Problem running VRRP process");
         panic!("{err}");
     });

@@ -17,7 +17,7 @@ pub(crate) fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn
         Ok(_) => panic!("Unknown channel type"),
         Err(err) => {
             log::error!("Unable to create datalink channel");
-            panic!("ERROR: {err}")
+            panic!("{err}")
         }
     }
 }
@@ -255,14 +255,12 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
 
 fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str)
 {
-    log::info!("ADDRESSES!!!");
     for addr in addresses {
         let cmd_args = vec!["ip", "address", action, &addr, "dev", interface_name];
         let _ = Command::new("sudo")
             .args(cmd_args)
             .output();
     }
-    log::info!("ADDRESS FINISHED");
 }
 
 

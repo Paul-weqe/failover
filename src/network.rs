@@ -1,8 +1,7 @@
-use std::{sync::Arc, time::Duration};
-use pnet::{datalink::{DataLinkReceiver, DataLinkSender}, packet::{
-    ethernet::{ EtherTypes, EthernetPacket }, icmp::IcmpPacket, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
-}};
-use tokio::sync::Mutex;
+use std::{sync::{Arc, Mutex}, thread, time::Instant};
+use pnet::packet::{
+    ethernet::{ EtherTypes, EthernetPacket }, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
+};
 use crate::{
     error::NetError, general::{create_datalink_channel, get_interface}, 
     pkt::{generators::{self, MutablePktGenerator}, 
@@ -12,48 +11,86 @@ use crate::{
 use crate::checksum;
 
 
+
+#[derive(Clone)]
+struct TaskItems {
+    vrouter: Arc<Mutex<VirtualRouter>>,
+    generator: MutablePktGenerator
+}
+
 /// initiates the network functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub async fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
+pub fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
 
     let interface = get_interface(&vrouter.network_interface);
-    let vrouter = Arc::new(Mutex::new(vrouter));
-    let pkt_generator = generators::MutablePktGenerator::new( interface.clone() );
 
+    let items = TaskItems {
+        vrouter: Arc::new(Mutex::new(vrouter)),
+        generator: generators::MutablePktGenerator::new(interface.clone())
+    };
+
+    // sync process listens for any incoming network requests
+    let network_items = items.clone();
+    let network_process = thread::spawn(move || { network_waiter(network_items) });
 
     // wait for when either MasterDownTimer or AdvertTimer is reached to 
     // carry out necessary actions. 
-    let timers_process = tokio::spawn(
-        timers_listener(
-            pkt_generator.clone(), 
-            create_datalink_channel(&interface), 
-            Arc::clone(&vrouter)
-        )
-    );
-
-    // async process listens for any incoming network requests
-    let network_process = tokio::spawn(
-        network_listener(
-            create_datalink_channel(&interface), 
-        Arc::clone(&vrouter)
-        )
-    );
+    let timers_items = items.clone();
+    let timers_process = thread::spawn( move || { timers_listener(timers_items) });
 
     // listen for any events happening to the vrouter
-    let event_process = tokio::spawn(
-        event_listener(
-            pkt_generator.clone(), 
-            create_datalink_channel(&interface), 
-            Arc::clone(&vrouter)
-        )
-    );
+    let event_items = items.clone();
+    let event_process = thread::spawn( move || { event_listener(event_items); });
     
-    let _ = tokio::join!(
-        event_process,
-        network_process, 
-        timers_process
-    );
+    network_process.join().unwrap();
+    timers_process.join().unwrap();
+    event_process.join().unwrap();
+    
     Ok(())
+}
+
+
+fn network_waiter(items: TaskItems) {
+    let interface = items.generator.interface;
+    let (_sender, mut receiver) = create_datalink_channel(&interface);
+    let vrouter = items.vrouter;
+
+    loop {
+        let buff = receiver.next().unwrap();
+        
+        let incoming_eth_pkt = EthernetPacket::new(buff).unwrap();
+        match incoming_eth_pkt.get_ethertype() {
+
+            EtherTypes::Ipv4 => {
+
+                let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
+                if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
+                    match handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)) {
+                        Ok(_) => {}
+                        Err(_) => {
+                            continue
+                        }
+                    }
+                }
+                
+            }
+            
+            EtherTypes::Arp => {
+                handle_incoming_arp_pkt( &incoming_eth_pkt, Arc::clone(&vrouter));
+            }
+
+            _ => {
+                let net_vr = &vrouter.lock().unwrap();
+                
+                // if we are master, we forward the packet. 
+                // otherwise we leave the packet be
+                if net_vr.fsm.state == States::Master {
+
+                }
+            }
+        }
+
+    }
 }
 
 
@@ -61,14 +98,13 @@ pub async fn run_vrrp(vrouter: VirtualRouter) -> Result<(), NetError>{
 /// Events that can occur are: Startup,  Shutdown, MasterDown, Null  
 /// Actions happening on when each of these Events is fired are
 /// Specified in RFC 3768 section 6.3, 6.4 and 6.5
-async fn event_listener(
-    generator: MutablePktGenerator, 
-    (mut sender, _receiver): (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>),
-    vrouter: Arc<Mutex<VirtualRouter>>
-){
+fn event_listener( items: TaskItems ){
+    let generator = items.generator;
+    let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
+    let vrouter = items.vrouter;
+
     loop {
-        
-        let mut vrouter = vrouter.lock().await;
+        let mut vrouter = vrouter.lock().unwrap();
         match &vrouter.fsm.event {
             
             // Startup actions specified in section 6.4.1 of RFC 3768
@@ -92,7 +128,7 @@ async fn event_listener(
                         let no_of_ips = vrouter.ip_addresses.len();
 
                         let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * no_of_ips)];
-                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
+                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
                         vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
                         
                         // IP packet
@@ -151,7 +187,7 @@ async fn event_listener(
                         // send ADVERTIEMENT 
                         // VRRP pakcet
                         let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
+                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
                         vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
                         
                         // IP packet
@@ -186,7 +222,7 @@ async fn event_listener(
                     {
                         // VRRP pakcet
                         let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
+                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
                         vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
                         
                         // IP packet
@@ -236,37 +272,34 @@ async fn event_listener(
     }
 }
 
+fn timers_listener(items: TaskItems) {
 
-async fn timers_listener(
-    generator: MutablePktGenerator, 
-    (mut sender, _receiver): (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>),
-    vrouter: Arc<Mutex<VirtualRouter>>
-) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    let generator = items.generator;
+    let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
+    let vrouter = items.vrouter;
+
     loop {
-        let mut timer_vrouter = vrouter.lock().await;
-        interval.tick().await;
+        let mut timer_vrouter = vrouter.lock().unwrap();
         let timer = timer_vrouter.fsm.timer;
 
         match timer.t_type {
             crate::state_machine::TimerType::MasterDown => {
-                if timer_vrouter.fsm.timer.remaining_time > 0.0 {
-                    timer_vrouter.fsm.reduce_timer();
-                } 
-                else {
+
+                if Instant::now() > timer_vrouter.fsm.timer.waiting_for.unwrap() {
                     timer_vrouter.fsm.state = States::Master;
                     log::info!("({}) transitioned to MASTER", timer_vrouter.name);
                     let advert_interval = timer_vrouter.advert_interval as f32;
                     timer_vrouter.fsm.set_advert_timer(advert_interval);
                 }
+
             }
 
             crate::state_machine::TimerType::Adver => {
-
-                if timer_vrouter.fsm.timer.remaining_time <= 0.0 {
+                
+                if Instant::now() > timer_vrouter.fsm.timer.waiting_for.unwrap() {
                     // VRRP pakcet
                     let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * timer_vrouter.ip_addresses.len())];
-                    let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &timer_vrouter).await;
+                    let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &timer_vrouter);
                     vrrp_packet.set_checksum(checksum::one_complement_sum(vrrp_packet.packet(), Some(6)));
                     
                     // // IP packet
@@ -283,58 +316,15 @@ async fn timers_listener(
                         .send_to(ether_packet.packet(), None)
                         .unwrap()
                         .unwrap();
+
+                    let advert_time = timer_vrouter.advert_interval as f32;
+                    timer_vrouter.fsm.set_advert_timer(advert_time);
                 }
-                timer_vrouter.fsm.reduce_timer();
+                // timer_vrouter.fsm.reduce_timer();
             }
 
             crate::state_machine::TimerType::Null =>  {
-
-            }
-        }
-    }
-}
-
-async fn network_listener(
-    (_sender, mut receiver): (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>),
-    vrouter: Arc<Mutex<VirtualRouter>>
-) {
-    loop {
-        let buf = receiver.next().unwrap();
-        let incoming_eth_pkt = EthernetPacket::new(buf).unwrap();
-        match incoming_eth_pkt.get_ethertype() {
-
-            EtherTypes::Ipv4 => {
-                // println!("IPV4!!!");
                 
-                let incoming_ip_pkt = Ipv4Packet::new(incoming_eth_pkt.payload()).unwrap();
-                if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                    match handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)).await {
-                        Ok(_) => {}
-                        Err(_) => {
-                            continue;
-                        }
-                    }
-                }
-                
-                else if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Icmp {
-                    println!("ICMP!!!");
-                    let icmp = IcmpPacket::new(incoming_ip_pkt.payload()).unwrap();
-                    println!("{:#?}", icmp);
-                }
-            }
-            
-            EtherTypes::Arp => {
-                handle_incoming_arp_pkt( &incoming_eth_pkt, Arc::clone(&vrouter)).await;
-            }
-
-            _ => {
-                let net_vr = &vrouter.lock().await;
-                
-                // if we are master, we forward the packet. 
-                // otherwise we leave the packet be
-                if net_vr.fsm.state == States::Master {
-
-                }
             }
         }
     }

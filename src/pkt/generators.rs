@@ -1,5 +1,4 @@
-use std::{net::Ipv4Addr, str::FromStr};
-use tokio::sync::MutexGuard;
+use std::{net::Ipv4Addr, str::FromStr, sync::MutexGuard};
 use pnet::{
     datalink::NetworkInterface, 
     packet::{arp::{ArpHardwareTypes, ArpOperations, MutableArpPacket}, 
@@ -11,9 +10,9 @@ use pnet::{
 use vrrp_packet::MutableVrrpPacket;
 use crate::router::VirtualRouter;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct MutablePktGenerator {
-    interface: NetworkInterface
+    pub(crate) interface: NetworkInterface
 }
 
 impl MutablePktGenerator 
@@ -25,7 +24,7 @@ impl MutablePktGenerator
         }
     }
 
-    pub(crate) async fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8], vrouter: &MutexGuard<'_, VirtualRouter>) -> MutableVrrpPacket<'a>
+    pub(crate) fn gen_vrrp_header<'a>(&self, buffer: &'a mut [u8], vrouter: &MutexGuard<'_, VirtualRouter>) -> MutableVrrpPacket<'a>
     {
         let mut addresses: Vec<u8> = Vec::new();
         for addr in &vrouter.ip_addresses {

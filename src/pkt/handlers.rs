@@ -1,7 +1,7 @@
 use core::f32;
-use std::{net::Ipv4Addr, sync::Arc};
+use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;
-use tokio::sync::Mutex;
+
 use crate::{checksum, error::NetError, pkt::generators, state_machine::Event};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
@@ -16,9 +16,9 @@ use crate::{
 };
 
 
-pub(crate) async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
+pub(crate) fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter: Arc<Mutex<VirtualRouter>>) {
 
-    let vrouter = vrouter.lock().await;
+    let vrouter = vrouter.lock().unwrap();
     let interface = get_interface(&vrouter.network_interface);
     let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
     
@@ -76,13 +76,14 @@ pub(crate) async fn handle_incoming_arp_pkt<'a>(eth_packet: &EthernetPacket<'a>,
     }
 }
 
-pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> Result<(), NetError>{
+pub(crate) fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> Result<(), NetError>{
 
-    let mut vrouter = vrouter_mutex.lock().await;
+    let mut vrouter = vrouter_mutex.lock().unwrap();
     let interface = get_interface(&vrouter.network_interface);
     let ip_packet = Ipv4Packet::new(eth_packet.payload()).unwrap();
     let vrrp_packet = VrrpPacket::new(ip_packet.payload()).unwrap();
     let mut error ;
+    
     // MUST DO verifications(rfc3768 section 7.1)
     {
         
@@ -193,8 +194,9 @@ pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>
     }
 
     if interface.ips.first().unwrap().ip() != ip_packet.get_source() {
+        
         match vrouter.fsm.state {
-            
+
             States::Backup => {
                 if vrrp_packet.get_priority() == 0 {
                     let skew_time = vrouter.skew_time;
@@ -227,7 +229,7 @@ pub(crate) async fn handle_incoming_vrrp_pkt<'a>(eth_packet: &EthernetPacket<'a>
                     let (mut sender, _) = create_datalink_channel(&interface);
 
                     let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                    let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter).await;
+                    let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
                     outgoing_vrrp_packet.set_checksum(checksum::one_complement_sum(outgoing_vrrp_packet.packet(), Some(6)));
 
                     let ip_len = vrrp_packet.packet().len() + 20;

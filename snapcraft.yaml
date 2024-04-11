@@ -1,5 +1,5 @@
 name: failover
-version: git
+version: '0.1.0'
 summary: A rust implementation of VRRP
 description: |
   #   Failover Usage:
@@ -34,6 +34,7 @@ description: |
 
   sudo ./failover --teardown
 
+grade: stable
 confinement: devmode
 base: core22
 
@@ -49,7 +50,8 @@ apps:
     before:
     - setup
     post-stop-command: bin/failover --action teardown
-
+    reload-command: bin/failover --action setup 
+    
   setup:
     command: bin/failover --action setup
     daemon: oneshot
