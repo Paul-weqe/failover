@@ -3,6 +3,7 @@
 [![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/failover)
 
 
+$\text{\color{red}Major performance issues currently being dealt with}$
 
 # Failover
 

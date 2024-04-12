@@ -35,7 +35,7 @@ description: |
   sudo ./failover --teardown
 
 grade: stable
-confinement: classic
+confinement: devmode
 base: core22
 
 parts:
