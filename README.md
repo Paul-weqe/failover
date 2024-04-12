@@ -1,7 +1,32 @@
+
+
+[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/failover)
+
+
+
 # Failover
+
+## Installation via snap
 Failover is a VRRP implementation currently configured for debian instances.
 
-## Config 
+To install failover, run the following command:
+
+```bash
+snap install failover
+```
+with this, we should see failover when we run the `snap list` command.
+
+
+When failover is installed, it automatically starts a systemd service that can be viewed via systemstl. 
+When we `sudo systemctl status snap.failover.main.service`, we should see:
+
+![systemctl screenshot](images/failover.png)
+
+That indicates that Failover is running as a daemon in on our system. 
+
+
+
+### Config 
 The following are the configurations that can be made on a <u>Failover</u> Virtual Router:
 
     - *name 
@@ -14,14 +39,14 @@ The following are the configurations that can be made on a <u>Failover</u> Virtu
 
     * Compulsory fields.  
 
-Failover can fetch configuration parameters either from the cli arguments or from a JSON file. 
+When installed via snap, Failover fetches configurations from /`snap/failover/bin/vrrp-config.json` file by default. 
 
-You can specify which mode you want to use by either having the `--file [FILENAME]` or `--cli [ARGS]`
+**Make sure to change the fields in this `/snap/failover/bin/vrrp-config.json` file to suite your personal environment**
+
+
 
 ### File config
-
-We collect file configs from a JSON file. Assuming our configs is in a `my-config.json` file, 
-this is how the `my-config.json` file should look like:
+The following is a sample of how our vrrp-config.json file will look like:
 
 ```json
 {
@@ -37,50 +62,13 @@ this is how the `my-config.json` file should look like:
 }
 ```
 
-To use this file as the configuration for our failover instance, we will run:
-```sh
-./failover --file my-config.json
-```
+For each of the ip addresses specified in the `ip_addresses` field, if we are MASTER in the VRRP process we take part in, the ip address(es) will be added to the interface specified in the `interface_name` field.
 
-### Default config 
-When run without a `--file [FILENAME]` nor `--cli [ARGS]` specified, the `/etc/failover/vrrp-config.json` file will be used by default as the configuration file. 
+For example, in the JSON file above, we have a single IP address (192.168.100.100/24). This will be how the address will look for `wlo1`:
 
-Can be run with:
-```sh
-./failover
-```
-This will automatically look into your `/etc/failover/vrrp-config.json` file and use its parameters as the config 
-for the virtual router we are going to create. 
+![failover-interface](images/failover-interface.png)
 
-To look into how the JSON configs, look in the File Config section. 
+*This address will automatically be deleted once the Failover service is stopped.*
 
-### Cli config
-Taking configs from the CLI, we have to specify run `./failover --cli [ARGS]`. to see all valid inputs  for the `[ARGS]`. 
-
-For a comprehensive list of the fields that can be taken inside the `[ARGS]`, run `./failover --help`. 
-
-A sample command taking CLI VRRP configs:
-
-```sh
-sudo ./target/debug/failover --cli --name VR_1 --vrid 51 --iface wlo1 --ip-address 192.168.100.100/24 --priority 10 --adv-interval 1 --preempt-mode true 
-```
-
-## Actions
-
-Actions are what should be done with the configs set. 
-
-There are three actions: `setup`, `teardown` and `run`. 
-
-- `setup`: This takes each of the IP addresses specified in our configuration and adds them to as address(es) on the network interface specified. 
-- `run`(default): When no action has been specified, this is what will be called. This carries out the necessary network advertisements. 
-- `teardown`: This removes the IP addresses that have been specified in the config from the network interface. 
-
-NOTE: It is recommended to run `setup`, then `run` and finally `teardown`. An example of how to do this is specified in the `run.sh` file. 
-
-Example:
-```bash
-./failover --action setup # will use vrrp-config.json as config file setup as action. 
-./failover # will use vrrp-config.json as config file and run as action. 
-./failover --action teardown # will use vrrp-config.json as config as teardown as action. 
-```
-
+More documentation is still being worked on.
+Will be ready to view [here](https://failover-docs.readthedocs.io/en/latest/). 

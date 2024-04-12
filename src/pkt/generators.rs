@@ -66,12 +66,8 @@ impl MutablePktGenerator
         vrrp_pkt.set_ip_addresses(&addresses);
         
         if vrrp_pkt.get_ip_addresses().len() > 20 {
-            log::error!("VRRP packet cannot have more than 20 IP addresses");
+            log::error!("VRRP packet cannot have more than 20 IP addresses. Fix in your configs.");
             panic!("VRRP configuration VRID={} has more than 20 IP addresses", vrrp_pkt.get_vrid());
-        }
-        if vrrp_pkt.get_ip_addresses().is_empty() {
-            log::error!("VRRP packet must have a virtual ip address");
-            panic!("VRRP configuration VRID={} does not have an ip address", vrrp_pkt.get_vrid());
         }
         vrrp_pkt
     }
