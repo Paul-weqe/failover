@@ -1,5 +1,5 @@
 
-use std::{error::Error, fs::{self, File}, io::{BufReader, Write}, path::Path, process::Command, str::FromStr};
+use std::{env, error::Error, fs::{self, File}, io::{BufReader, Write}, path::Path, process::Command, str::FromStr};
 use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
@@ -21,6 +21,20 @@ pub(crate) fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn
         }
     }
 }
+
+const DEFAULT_JSON_CONFIG: &'static [u8; 201] = b"
+{
+    \"name\": \"VR_1\",
+    \"vrid\": 51,
+    \"interface_name\": \"wlo1\",
+    \"ip_addresses\": [
+        \"192.168.100.100/24\"
+    ],
+    \"priority\": 101,
+    \"advert_interval\": 1,
+    \"preempt_mode\": true
+}
+";
 
 // takes the configs that have been received and converts them 
 // into a virtual router instance. 
@@ -224,25 +238,22 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         let filename = if matches.opt_str("file").is_some() { 
             matches.opt_str("file").unwrap() 
         } else {
-            // let curr_path = current_dir().unwrap();
 
-            let file_path = "/etc/failover/vrrp-config.json";
-            let _ = fs::create_dir_all("/etc/failover/");
+            // if app is running via snap, the SNAP_COMMON environment 
+            // variable will be used as the config directory
+            let directory = match env::var("SNAP_COMMON") {
+                Ok(path) => path + "/",
+                Err(_) => {
+                    let _ = fs::create_dir_all("/etc/failover/");
+                    "/etc/failover/".to_string()
+                }
+            };
+
+            let file_path = &format!("{}vrrp-config.json", directory);
+
             if !Path::new(file_path).exists() {
                 let mut file = File::create(file_path).unwrap();
-                let _ = file.write_all(b"
-                {
-                    \"name\": \"VR_1\",
-                    \"vrid\": 51,
-                    \"interface_name\": \"wlo1\",
-                    \"ip_addresses\": [
-                        \"192.168.100.100/24\"
-                    ],
-                    \"priority\": 101,
-                    \"advert_interval\": 1,
-                    \"preempt_mode\": true
-                }
-                ");
+                let _ = file.write_all(DEFAULT_JSON_CONFIG);
             }
             file_path.to_string()
         };
