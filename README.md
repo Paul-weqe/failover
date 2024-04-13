@@ -3,32 +3,10 @@
 [![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/failover)
 
 
-$\text{\color{red}Major performance issues currently being dealt with}$
-
 # Failover
 
-## Installation via snap
-Failover is a VRRP implementation currently configured for debian instances.
-
-To install failover, run the following command:
-
-```bash
-snap install failover
-```
-with this, we should see failover when we run the `snap list` command.
-
-
-When failover is installed, it automatically starts a systemd service that can be viewed via systemstl. 
-When we `sudo systemctl status snap.failover.main.service`, we should see:
-
-![systemctl screenshot](images/failover.png)
-
-That indicates that Failover is running as a daemon in on our system. 
-
-
-
 ### Config 
-The following are the configurations that can be made on a <u>Failover</u> Virtual Router:
+The following are the items that can be configured on <u>Failover</u>:
 
     - *name 
     - *Virtual Router ID
@@ -40,36 +18,60 @@ The following are the configurations that can be made on a <u>Failover</u> Virtu
 
     * Compulsory fields.  
 
-When installed via snap, Failover fetches configurations from /`snap/failover/bin/vrrp-config.json` file by default. 
 
-**Make sure to change the fields in this `/snap/failover/bin/vrrp-config.json` file to suite your personal environment**
+## Installation via snap
+Failover is a VRRP implementation currently configured for debian instances.
 
+To install failover, run the following command:
 
+```sh
+snap install failover --devmode --edge
+```
+with this, we should see failover when we run the `snap list` command.
 
-### File config
-The following is a sample of how our vrrp-config.json file will look like:
+*Due to restrictions from the snap store, we can only run --edge and --beta*
 
-```json
-{
-    "name": "VR_1",
-    "vrid": 51,
-    "interface_name": "wlo1",
-    "ip_addresses": [ 
-        "192.168.100.100/24"
-    ],
-    "priority": 10,
-    "advert_interval": 1,
-    "preempt_mode": true
-}
+When failover is installed, it automatically starts a systemd service that can be viewed via systemstl. 
+When we `sudo systemctl status snap.failover.main.service`, we should see:
+
+![systemctl screenshot](images/failover.png)
+
+That indicates that Failover is running as a daemon in on our system. 
+
+If there is a problem with the running of Failover, view the logs with the following command:
+```sh
+journalctl -xeu snap.failover.setup.service
 ```
 
-For each of the ip addresses specified in the `ip_addresses` field, if we are MASTER in the VRRP process we take part in, the ip address(es) will be added to the interface specified in the `interface_name` field.
+Also, feel free to raise an [issue](https://github.com/Paul-weqe/failover/issues) in case of anything.  
 
-For example, in the JSON file above, we have a single IP address (192.168.100.100/24). This will be how the address will look for `wlo1`:
+When installed via snap, Failover fetches configurations from `/var/snap/failover/common/vrrp-config.json` file by default. The configurations 
 
-![failover-interface](images/failover-interface.png)
+**Make sure to change the fields in this `/var/snap/failover/common/vrrp-config.json` file to suite your personal environment. Sample configs are shown on [sample config](https://github.com/Paul-weqe/failover/blob/main/sample-vrrp-config.json).**
 
-*This address will automatically be deleted once the Failover service is stopped.*
 
-More documentation is still being worked on.
-Will be ready to view [here](https://failover-docs.readthedocs.io/en/latest/). 
+## Running Failover from local build. 
+
+Failover can also be built and run manually via cargo. To install cargo, follow [this guide](https://doc.rust-lang.org/cargo/getting-started/index.html).
+
+You can run the project using the command:
+```sh
+cargo run --bin failover
+```
+
+Since VRRP creates virtual IP addresses on one of our system's interfaces, we should do a teardown to remove the IP addresses from the system once Failover is done running:
+```sh
+cargo run --bin failover --teardown
+```
+
+To simplify the two commands above, we can run: 
+
+```sh
+./run
+```
+
+When running from a local build, by default the `/etc/failover/vrrp-config.json` file will be used as our configuration file. Take [this](https://github.com/Paul-weqe/failover/blob/main/sample-vrrp-config.json) as a sample of how your JSON config file should look like. 
+
+$\text{\color{red}More documentation is still being worked on.}$
+
+Will be ready to view in due time [here](https://failover-docs.readthedocs.io/en/latest/). 

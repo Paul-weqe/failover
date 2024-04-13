@@ -1,38 +1,13 @@
 name: failover
-version: '0.2.3'
+version: '0.2.4'
 summary: A rust implementation of VRRP
 description: |
-  #   Failover Usage:
-  # running failover, we take configs either from a json file or from the cli   
-  CONFIG
-  ======
+  Failover is a rust implementation of the VRRP protocol. 
 
-  FILE CONFIG MODE
-  ----------------
-  ./failover --file custom-vrrp-config.json
+  VRRP is a redundancy protocol that achieves this by 'creating' a virtual device with virtual network parameters. 
 
-  CLI CONFIG MODE 
-  ---------------
-  ./failover --cli --iface wlo1 --priority 101 --adv-interval 1 --preempt-mode false
-
-  DEFAULT
-  -------
-  ./failover 
-  # if neither 'file' not 'cli' is specified, failover chooses 'file' by default. 
-  # The file that is used for configs is './vrrp-config.json' in the same 
-  # directory where failover is being run from (TODO: to change this to relevant config file in /etc directory).
-
-  ACTIONS
-  =======
-  # Three actions can be run: 'setup', 'teardown' or 'run'. 
-  # 'run'. setup and teardown must be run with superuser persmissions 
-  # since they are used to add an IP and remove an IP from an interface
-  sudo ./failover --setup
+  The protocol has been tested together with `keepalived` and will soon be tested with routers and switches from major vendors.
   
-  # can also be called without --run
-  ./failover --run 
-
-  sudo ./failover --teardown
 
 grade: stable
 confinement: devmode
