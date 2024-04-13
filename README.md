@@ -15,7 +15,10 @@ The following image from [Network Lessons](https://networklessons.com/cisco/ccie
 
 ![network lessons VRRP illustration](images/vrp-illustration.png)
 
+
 Whichever between 192.168.1.1 or 192.168.1.2 is MASTER of the virtual router(192.168.1.3), the end users(192.168.1.200 and 192.168.1.201) will not notice when one goes down and the other takes over. 
+
+This library implements the above. Also, these same concepts can be transferred from Routers to Servers where redundancy is needed. 
 
 ## Installation via snap
 
