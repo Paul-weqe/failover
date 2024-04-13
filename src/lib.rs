@@ -2,12 +2,14 @@ use std::{sync::{Arc, Mutex}, thread};
 
 use error::NetError;
 use general::get_interface;
+use observer::EventObserver;
 use pkt::generators::{self, MutablePktGenerator};
 use router::VirtualRouter;
+use state_machine::Event;
 
 
 pub mod general;
-
+mod observer;
 mod config;
 mod core;
 mod router;
@@ -57,6 +59,7 @@ pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
         generator: generators::MutablePktGenerator::new(interface.clone())
     };
 
+    EventObserver::notify(items.vrouter.clone(), Event::Startup);
     // sync process listens for any incoming network requests
     let network_items = items.clone();
     let network_process = thread::spawn(move || { core::network_process(network_items) });
@@ -65,14 +68,9 @@ pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
     // carry out necessary actions. 
     let timers_items = items.clone();
     let timers_process = thread::spawn( move || { core::timer_process(timers_items) });
-
-    // listen for any events happening to the vrouter
-    let event_items = items.clone();
-    let event_process = thread::spawn( move || { core::event_process(event_items); });
     
     network_process.join().unwrap();
     timers_process.join().unwrap();
-    event_process.join().unwrap();
     
     Ok(())
 }
