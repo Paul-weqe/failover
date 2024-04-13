@@ -1,5 +1,5 @@
 
-use std::{env::current_dir, error::Error, fs::File, io::{BufReader, Write}, path::Path, process::Command, str::FromStr};
+use std::{error::Error, fs::{self, File}, io::{BufReader, Write}, path::Path, process::Command, str::FromStr};
 use crate::{config::{CliConfig, FileConfig, VrrpConfig}, error::OptError, router::VirtualRouter, state_machine::VirtualRouterMachine};
 use getopts::Options;
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
@@ -224,10 +224,12 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
         let filename = if matches.opt_str("file").is_some() { 
             matches.opt_str("file").unwrap() 
         } else {
-            let curr_path = current_dir().unwrap();
-            let file_path = format!("{}/vrrp-config.json", curr_path.to_str().unwrap());
-            if !Path::new(&file_path).exists() {
-                let mut file = File::create(file_path.clone()).unwrap();
+            // let curr_path = current_dir().unwrap();
+
+            let file_path = "/etc/failover/vrrp-config.json";
+            let _ = fs::create_dir_all("/etc/failover/");
+            if !Path::new(file_path).exists() {
+                let mut file = File::create(file_path).unwrap();
                 let _ = file.write_all(b"
                 {
                     \"name\": \"VR_1\",
@@ -242,7 +244,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
                 }
                 ");
             }
-            file_path 
+            file_path.to_string()
         };
         let file_config = match read_config_from_json_file(&filename) {
             Ok(config) => VrrpConfig::File(config),

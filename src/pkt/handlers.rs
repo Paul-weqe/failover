@@ -11,7 +11,7 @@ use core::f32;
 use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;
 
-use crate::{checksum, error::NetError, general::virtual_address_action, pkt::generators, state_machine::Event};
+use crate::{checksum, error::NetError, general::virtual_address_action, observer::EventObserver, pkt::generators, state_machine::Event};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
     ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
@@ -201,7 +201,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
         }
 
     }
-
+    
     if interface.ips.first().unwrap().ip() != ip_packet.get_source() {
         
         match vrouter.fsm.state {
@@ -257,7 +257,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                         .unwrap();
                     let advert_interval = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_interval);
-                    vrouter.fsm.event = Event::Null;
+                    
                     Ok(())
 
                 }
@@ -269,8 +269,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                     let m_down_interval = vrouter.master_down_interval;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;
-                    vrouter.fsm.event = Event::Null;
                     log::info!("({}) transitioned to BACKUP", vrouter.name);
+                    EventObserver::notify_mut(vrouter, Event::Null);
                     Ok(())
                 }
                 else if adv_priority_eq_local_priority {
@@ -282,6 +282,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                     vrouter.fsm.state = States::Backup;
                     vrouter.fsm.event = Event::Null;
                     log::info!("({}) transitioned to BACKUP", vrouter.name);
+                    EventObserver::notify_mut(vrouter, Event::Null);
                     Ok(())
                 }
                 else {Ok(()) 

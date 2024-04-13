@@ -116,7 +116,6 @@ pub(crate) fn timer_process(items: crate::TaskItems) {
                     let advert_time = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_time);
                 }
-                // timer_vrouter.fsm.reduce_timer();
             }
 
             crate::state_machine::TimerType::Null =>  {
