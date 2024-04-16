@@ -1,4 +1,5 @@
-use failover::general::{parse_cli_opts, config_to_vr};
+use failover::{config::parse_cli_opts, general::config_to_vr};
+
 use std::env;
 use simple_logger::SimpleLogger;
 
