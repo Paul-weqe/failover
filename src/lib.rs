@@ -9,8 +9,8 @@ use state_machine::Event;
 
 
 pub mod general;
+pub mod config;
 mod observer;
-mod config;
 mod core;
 mod router;
 mod state_machine;
@@ -45,6 +45,8 @@ pub mod error{
             write!(f, "{}", self.0)
         }
     }
+
+
 }
 
 
