@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, thread};
+use std::{io, sync::{Arc, Mutex}, thread};
 
 use error::NetError;
 use general::get_interface;
@@ -50,7 +50,7 @@ pub mod error{
 }
 
 
-/// initiates the network functions across the board. 
+/// initiates the VRRP functions across the board. 
 /// from interfaces, channels, packet handling etc...
 pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
 
@@ -69,10 +69,26 @@ pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
     // wait for when either MasterDownTimer or AdvertTimer is reached to 
     // carry out necessary actions. 
     let timers_items = items.clone();
-    let timers_process = thread::spawn( move || { core::timer_process(timers_items) });
+    let timers_process = thread::spawn( move || { 
+        core::timer_process(timers_items).unwrap() 
+    });
     
-    network_process.join().unwrap();
-    timers_process.join().unwrap();
+    match network_process.join() {
+        Ok(_) => {},
+        Err(_) => {
+            log::error!("problem running network process");
+            log::error!("{}", io::Error::last_os_error());
+            return Result::Err(NetError("Unable to execute network thread".to_string()))
+        }
+    };
+    match timers_process.join() {
+        Ok(_) => {},
+        Err(_) => {
+            log::error!("problem unning the timer provess");
+            log::error!("{}", io::Error::last_os_error());
+            return Result::Err(NetError("Unable to execute event thread".to_string()));
+        }
+    }
     
     Ok(())
 }
