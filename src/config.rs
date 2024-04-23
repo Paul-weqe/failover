@@ -117,7 +117,7 @@ impl VrrpConfig {
 
 
 
-const DEFAULT_JSON_CONFIG: &'static [u8; 201] = b"
+const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 {
     \"name\": \"VR_1\",
     \"vrid\": 51,

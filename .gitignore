@@ -2,4 +2,3 @@
 src/bin/trial.rs
 *.snap
 build.sh
-src/bin/cool.rs
