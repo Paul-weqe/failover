@@ -11,7 +11,7 @@ use core::f32;
 use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;
 
-use crate::{checksum, error::NetError, general::virtual_address_action, observer::EventObserver, pkt::generators, state_machine::Event};
+use crate::{checksum, error::NetError, general::virtual_address_action, observer::EventObserver, pkt::generators, state_machine::Event, NetResult};
 use pnet::packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
     ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
@@ -25,7 +25,7 @@ use crate::{
 };
 
 
-pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: Arc<Mutex<VirtualRouter>>) {
+pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: Arc<Mutex<VirtualRouter>>) -> NetResult<()>{
 
     let vrouter = vrouter.lock().unwrap();
     let interface = get_interface(&vrouter.network_interface);
@@ -38,7 +38,7 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
-                    return 
+                    return Ok(())
                 }
             }
             
@@ -54,7 +54,7 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
-                    let (mut sender, _) = create_datalink_channel(&interface);
+                    let (mut sender, _) = create_datalink_channel(&interface)?;
 
                     // respond to arp request
                     let mut ethernet_buffer = [0u8; 42];
@@ -83,6 +83,8 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             }
         }
     }
+
+    Ok(())
 }
 
 pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> Result<(), NetError>{
@@ -236,7 +238,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
 
                     // send ADVERTISEMENT
                     let mut_pkt_generator = generators::MutablePktGenerator::new(interface.clone());
-                    let (mut sender, _) = create_datalink_channel(&interface);
+                    let (mut sender, _) = create_datalink_channel(&interface)?;
 
                     let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
                     let mut outgoing_vrrp_packet = mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
@@ -270,7 +272,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                     vrouter.fsm.set_master_down_timer(m_down_interval);
                     vrouter.fsm.state = States::Backup;
                     log::info!("({}) transitioned to BACKUP", vrouter.name);
-                    EventObserver::notify_mut(vrouter, Event::Null);
+                    EventObserver::notify_mut(vrouter, Event::Null)?;
                     Ok(())
                 }
                 else if adv_priority_eq_local_priority {
@@ -282,7 +284,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                     vrouter.fsm.state = States::Backup;
                     vrouter.fsm.event = Event::Null;
                     log::info!("({}) transitioned to BACKUP", vrouter.name);
-                    EventObserver::notify_mut(vrouter, Event::Null);
+                    EventObserver::notify_mut(vrouter, Event::Null)?;
                     Ok(())
                 }
                 else {Ok(()) 

@@ -51,7 +51,7 @@ fn propagate_carries(word: u32) -> u16
 
 // one_complement_sum() function
 /// returns all-zeros if checksum is valid
-pub fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
+pub(crate) fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
 {
     let mut sum = 0u32;
     let mut idx = 0;

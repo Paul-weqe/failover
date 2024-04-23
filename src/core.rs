@@ -15,7 +15,7 @@ use pnet::packet::{
 };
 use crate::{
     general::create_datalink_channel, observer::EventObserver, pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt},
-    state_machine::{Event, States}
+    state_machine::{Event, States}, NetResult
 };
 use crate::checksum;
 
@@ -23,10 +23,11 @@ use crate::checksum;
 /// Waits for network connections and does the necessary actions. 
 /// Acts on the queries mostly described from the state machine 
 /// in chapter 6.3 onwards ofRFC 3768
-pub(crate) fn network_process(items: crate::TaskItems) {
+pub(crate) fn network_process(items: crate::TaskItems) -> NetResult<()> {
     // NetworkInterface
     let interface = items.generator.interface;
-    let (_sender, mut receiver) = create_datalink_channel(&interface);
+
+    let (_sender, mut receiver) = create_datalink_channel(&interface)?;
     let vrouter = items.vrouter;
 
     loop {
@@ -72,7 +73,13 @@ pub(crate) fn network_process(items: crate::TaskItems) {
             }
             
             EtherTypes::Arp => {
-                handle_incoming_arp_pkt( &incoming_eth_pkt, Arc::clone(&vrouter));
+                match handle_incoming_arp_pkt( &incoming_eth_pkt, Arc::clone(&vrouter)) {
+                    Ok(_) => {  },
+                    Err(err) => {
+                        log::error!("problem handing incoming ARP packet");
+                        log::error!("{err}");
+                    }
+                }
             }
 
             _ => {
@@ -101,10 +108,11 @@ pub(crate) fn network_process(items: crate::TaskItems) {
 
 /// Used to track the various timers: (MasterDownTimer and Advertimer)
 /// Has been explained in RFC 3768 section 6.2
-pub(crate) fn timer_process(items: crate::TaskItems) -> io::Result<()>{
+pub(crate) fn timer_process(items: crate::TaskItems) -> NetResult<()> {
 
     let generator = items.generator;
-    let (mut sender, _receiver) = create_datalink_channel(&generator.interface);
+    let (mut sender, _receiver) = create_datalink_channel(&generator.interface)?;
+
     let vrouter = items.vrouter;
 
     loop {
@@ -126,7 +134,10 @@ pub(crate) fn timer_process(items: crate::TaskItems) -> io::Result<()>{
                     // to notify for the master down
                     Some(waiting) => {
                         if Instant::now() > waiting {
-                            EventObserver::notify_mut(vrouter, Event::MasterDown)
+                            match EventObserver::notify_mut(vrouter, Event::MasterDown) {
+                                Ok(info) => info,
+                                Err(err) => return Err(err)
+                            }
                         }
                     },
                     None => {

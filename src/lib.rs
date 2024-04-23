@@ -1,5 +1,4 @@
 use std::{io, sync::{Arc, Mutex}, thread};
-
 use error::NetError;
 use general::get_interface;
 use observer::EventObserver;
@@ -17,6 +16,8 @@ mod state_machine;
 mod pkt;
 mod checksum;
 
+pub type NetResult<T> = Result<T, NetError>;
+
 #[derive(Clone)]
 pub(crate) struct TaskItems {
     vrouter: Arc<Mutex<VirtualRouter>>,
@@ -24,22 +25,23 @@ pub(crate) struct TaskItems {
 }
 
 pub mod error{
-    use std::fmt::Display;
+    use std::{error::Error, fmt::Display};
 
+    // error 
     #[derive(Debug)]
     pub struct NetError(pub String);
-    
+    impl Error for NetError {}
     impl Display for NetError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.0)
         }
     }
 
-
-    /// used for getting errors when parsing CLI arguments
+    // OptError 
+    // used for getting errors when parsing CLI arguments
     #[derive(Debug)]
     pub struct OptError(pub String);
-
+    impl Error for OptError {}
     impl Display for OptError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.0)
@@ -52,7 +54,7 @@ pub mod error{
 
 /// initiates the VRRP functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
+pub fn run(vrouter: VirtualRouter) -> NetResult<()>{
 
     let interface = get_interface(&vrouter.network_interface);
 
@@ -61,7 +63,13 @@ pub fn run(vrouter: VirtualRouter) -> Result<(), NetError>{
         generator: generators::MutablePktGenerator::new(interface.clone())
     };
 
-    EventObserver::notify(items.vrouter.clone(), Event::Startup);
+    match EventObserver::notify(items.vrouter.clone(), Event::Startup){
+        Ok(_) => {},
+        Err(err) => {
+            log::error!("{err}");
+            panic!("Problem running initial notify statement");
+        }
+    };
     // sync process listens for any incoming network requests
     let network_items = items.clone();
     let network_process = thread::spawn(move || { core::network_process(network_items) });

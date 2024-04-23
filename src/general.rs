@@ -1,6 +1,6 @@
 
 use std::{process::Command, str::FromStr};
-use crate::{config::VrrpConfig, router::VirtualRouter, state_machine::VirtualRouterMachine};
+use crate::{config::VrrpConfig, error::NetError, router::VirtualRouter, state_machine::VirtualRouterMachine, NetResult};
 use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface};
 use ipnet::Ipv4Net;
 use rand::{distributions::Alphanumeric, Rng};
@@ -14,15 +14,21 @@ pub(crate) fn get_interface(name: &str) -> NetworkInterface {
     
 }
 
-pub(crate) fn create_datalink_channel(interface: &NetworkInterface)  -> (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>){
+pub(crate) fn create_datalink_channel(interface: &NetworkInterface) -> NetResult<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)>
+{
+
     match pnet::datalink::channel(interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unknown channel type"),
+        Ok(Channel::Ethernet(tx, rx)) => Ok((tx, rx)),
+        Ok(_) => {
+
+            Err(NetError("Unknown channel type".to_string()))
+        }
         Err(err) => {
-            log::error!("Unable to create datalink channel");
-            panic!("{err}")
+            log::error!("{err}");
+            Err(NetError("Problem creating datalink channel".to_string()))
         }
     }
+
 }
 
 // takes the configs that have been received and converts them 
