@@ -24,7 +24,7 @@ use crate::checksum;
 /// Waits for network connections and does the necessary actions. 
 /// Acts on the queries mostly described from the state machine 
 /// in chapter 6.3 onwards ofRFC 3768
-pub(crate) fn network_process(items: crate::TaskItems) -> NetResult<()> {
+pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
     // NetworkInterface
     let interface = items.generator.interface;
 
@@ -109,7 +109,7 @@ pub(crate) fn network_process(items: crate::TaskItems) -> NetResult<()> {
 
 /// Used to track the various timers: (MasterDownTimer and Advertimer)
 /// Has been explained in RFC 3768 section 6.2
-pub(crate) fn timer_process(items: crate::TaskItems) -> NetResult<()> {
+pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
 
     let generator = items.generator;
     let (mut sender, _receiver) = create_datalink_channel(&generator.interface)?;

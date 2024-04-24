@@ -5,6 +5,7 @@ use observer::EventObserver;
 use pkt::generators::{self, MutablePktGenerator};
 use router::VirtualRouter;
 use state_machine::Event;
+use tokio::task::JoinSet;
 
 
 pub mod general;
@@ -55,7 +56,7 @@ pub mod error{
 
 /// initiates the VRRP functions across the board. 
 /// from interfaces, channels, packet handling etc...
-pub fn run(vrouter: VirtualRouter) -> NetResult<()>{
+pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
 
     let interface = get_interface(&vrouter.network_interface)?;
 
@@ -71,32 +72,19 @@ pub fn run(vrouter: VirtualRouter) -> NetResult<()>{
             panic!("Problem running initial notify statement");
         }
     };
+    let mut tasks_set = JoinSet::new();
+
     // sync process listens for any incoming network requests
     let network_items = items.clone();
-    let network_process = thread::spawn(move || { core::network_process(network_items) });
-
-    // wait for when either MasterDownTimer or AdvertTimer is reached to 
-    // carry out necessary actions. 
-    let timers_items = items.clone();
-    let timers_process = thread::spawn( move || { 
-        core::timer_process(timers_items).unwrap() 
+    tasks_set.spawn(async {
+        core::network_process(network_items).await
     });
-    
-    match network_process.join() {
-        Ok(_) => {},
-        Err(_) => {
-            log::error!("problem running network process");
-            log::error!("{}", io::Error::last_os_error());
-            return Result::Err(NetError("Unable to execute network thread".to_string()))
-        }
-    };
-    match timers_process.join() {
-        Ok(_) => {},
-        Err(_) => {
-            log::error!("problem unning the timer provess");
-            log::error!("{}", io::Error::last_os_error());
-            return Result::Err(NetError("Unable to execute event thread".to_string()));
-        }
+
+    let timer_items = items.clone();
+    tasks_set.spawn(async {
+        core::timer_process(timer_items).await
+    });
+    while let Some(_) = tasks_set.join_next().await {
     }
     
     Ok(())

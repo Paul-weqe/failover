@@ -1,9 +1,11 @@
 use failover::{config::parse_cli_opts, general::config_to_vr};
+use tokio::task::JoinSet;
 
-use std::{env, thread};
+use std::env;
 use simple_logger::SimpleLogger;
 
-fn main(){
+#[tokio::main]
+async fn main(){
 
     SimpleLogger::new().with_colors(true).init().unwrap();
     
@@ -16,19 +18,17 @@ fn main(){
             panic!("{err}");
         }
     };
-
-    let mut thread_pool = vec![];
+    let mut routers_tasks = JoinSet::new();
     for config in routers_config {
-        let router_thread = thread::spawn(|| {
-            let vrouter = config_to_vr(config);    
-            failover::run(vrouter).unwrap_or_else(|err| {
-                log::error!("Problem running VRRP process");
-                panic!("{err}");
-            });
+        let vrouter = config_to_vr(config);
+        routers_tasks.spawn(async {
+            failover::run(vrouter).await
         });
-        thread_pool.push(router_thread);
     }
+
+
+    while let Some(_) = routers_tasks.join_next().await {}
+
     
-    for t in thread_pool { let _ = t.join(); }
 }
 
