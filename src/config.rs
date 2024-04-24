@@ -12,11 +12,13 @@ fn default_action() -> Action { Action::Run }
 // for reading JSON config file
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileConfig {
-    pub name: Option<String>,
+
     pub vrid: u8,
     pub ip_addresses: Vec<String>,
     pub interface_name: Option<String>,
 
+    #[serde(default="random_string")]
+    pub name: String,
     #[serde(default = "default_priority")]
     pub priority: u8,
     #[serde(default = "default_advert_int")]
@@ -60,12 +62,12 @@ impl VrrpConfig {
     // for name, if not specified, we will generate a random name (VR-{random-string})
     pub fn name(&self) -> String {
         let name = match self { 
-            VrrpConfig::File(config) => config.name.clone(),
+            VrrpConfig::File(config) => Some(config.name.clone()),
             VrrpConfig::Cli(config) => config.name.clone()
         };
         match name {
             Some(n) => n,
-            None => format!("VR-{}", random_string(10))
+            None => random_string()
         }   
     }
     
@@ -128,7 +130,6 @@ const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
     \"preempt_mode\": true
 }
 ";
-
 
 pub fn parse_cli_opts(args: &[String]) -> Result<Vec<VrrpConfig>, OptError>{
     let mut opts = Options::new();
@@ -350,7 +351,26 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> Result<Vec<FileConfig>, Box<dyn 
     
     let list_file_configs: Vec<FileConfig> = serde_json::from_reader(reader)?;
     for file_config in list_file_configs {
-        result.push(file_config.clone());
+        
+        // check if configs with same VR name exist
+        match result.iter().find(|r: &&FileConfig| r.name == file_config.name) {
+            Some(con) => {
+                log::warn!("Configs for Virtual Router with name {:?} already exist. Will be ignored", con.name);
+                continue
+            }, 
+            None => {}
+        }
+
+        // check if configs with same VRID exist
+        match result.iter().find(|r: &&FileConfig| r.vrid == file_config.vrid) {
+            Some(con) => {
+                log::warn!("Configs for Virtual Router with VRID {:?} already exist. Will be ignored", con.vrid);
+                continue
+            }, 
+            None => {}
+        }
+        result.push(file_config);
     }
+
     Ok(result)
 }

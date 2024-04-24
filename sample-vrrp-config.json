@@ -1,11 +1,24 @@
-{
-    "name": "VR_1",
-    "vrid": 51,
-    "interface_name": "wlo1",
-    "ip_addresses": [ 
-        "192.168.100.100/24"
-    ],
-    "priority": 101,
-    "advert_interval": 1,
-    "preempt_mode": true
-}
+[
+    {
+        "name": "VR_1",
+        "vrid": 51,
+        "interface_name": "wlo1",
+        "ip_addresses": [ 
+            "192.168.100.100/24"
+        ],
+        "priority": 101,
+        "advert_interval": 1,
+        "preempt_mode": true
+    },
+    {
+        "name": "VR_2",
+        "vrid": 53,
+        "interface_name": "wlo1",
+        "ip_addresses": [ 
+            "192.168.100.100/24"
+        ],
+        "priority": 110,
+        "advert_interval": 1,
+        "preempt_mode": true
+    }
+]

@@ -87,11 +87,12 @@ pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interfa
 }
 
 
-pub(crate) fn random_string(length: usize) -> String 
+pub(crate) fn random_string() -> String 
 {
-    rand::thread_rng()
+    let val: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(length)
+        .take(10)
         .map(char::from)
-        .collect()
+        .collect();
+    format!("VR_{val}")
 }
