@@ -34,7 +34,7 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             return Err(NetError(format!("Unable to create mutex lock for vrouter\n\n {err}")))
         }
     };
-    let interface = get_interface(&vrouter.network_interface);
+    let interface = get_interface(&vrouter.network_interface)?;
     let arp_packet = match ArpPacket::new(eth_packet.payload()) {
         Some(pkt) => pkt,
         None => return Ok(())
@@ -117,7 +117,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
             return Ok(())
         }
     };
-    let interface = get_interface(&vrouter.network_interface);
+    let interface = get_interface(&vrouter.network_interface)?;
     let ip_packet = match Ipv4Packet::new(eth_packet.payload()) {
         Some(pkt) => pkt,
         None => {

@@ -5,13 +5,16 @@ use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInt
 use ipnet::Ipv4Net;
 use rand::{distributions::Alphanumeric, Rng};
 
-pub(crate) fn get_interface(name: &str) -> NetworkInterface
+pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface>
 {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
     let interfaces = datalink::linux::interfaces();
 
     // check if interface name exists, if not create it
-    interfaces.into_iter().find(interface_names_match).unwrap()
+    match interfaces.into_iter().find(interface_names_match) {
+        Some(interface) => Ok(interface),
+        None => Err(NetError(format!("unable to find interface with name {name}")))
+    } 
     
 }
 
@@ -94,5 +97,7 @@ pub(crate) fn random_string() -> String
         .take(10)
         .map(char::from)
         .collect();
+
+    log::info!("Name for Virtual Router not given. generated name VR_{val}");
     format!("VR_{val}")
 }

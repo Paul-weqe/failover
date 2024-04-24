@@ -26,7 +26,7 @@ impl EventObserver {
     }
 
     pub(crate) fn notify_mut(mut vrouter: MutexGuard<'_, VirtualRouter>, event: Event) -> NetResult<()>{
-        let interface = get_interface(&vrouter.network_interface);
+        let interface = get_interface(&vrouter.network_interface)?;
         let generator = MutablePktGenerator::new(interface.clone());
         let (mut sender, _receiver) = create_datalink_channel(&interface)?;
 

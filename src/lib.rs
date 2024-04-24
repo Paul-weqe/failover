@@ -56,7 +56,7 @@ pub mod error{
 /// from interfaces, channels, packet handling etc...
 pub fn run(vrouter: VirtualRouter) -> NetResult<()>{
 
-    let interface = get_interface(&vrouter.network_interface);
+    let interface = get_interface(&vrouter.network_interface)?;
 
     let items = TaskItems {
         vrouter: Arc::new(Mutex::new(vrouter)),
