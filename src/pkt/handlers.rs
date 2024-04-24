@@ -141,14 +141,9 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
     // }
     // received packets from the same device
     for interface in datalink::interfaces().iter() {
-        match interface.ips.first() {
-            Some(ip) => {
-                if ip.ip() == ip_packet.get_source() { 
-                    return Ok(()) 
-                }
-            }
-            None => { }
-        }
+        if let Some(ip) =interface.ips.first() {
+            if ip.ip() == ip_packet.get_source() { return Ok(()) }
+        };
     }
     
 

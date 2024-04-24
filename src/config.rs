@@ -354,7 +354,7 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>>
     };
     
     let reader = BufReader::new(file);
-    let mut result = vec![];
+    let mut result: Vec<FileConfig> = Vec::new();
 
     
     let list_file_configs: Vec<FileConfig> = match serde_json::from_reader(reader) {
@@ -369,23 +369,17 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>>
     
     for file_config in list_file_configs {
         
-        // check if configs with same VR name exist
-        match result.iter().find(|r: &&FileConfig| r.name == file_config.name) {
-            Some(con) => {
-                log::warn!("Configs for Virtual Router with name {:?} already exist. Will be ignored", con.name);
-                continue
-            }, 
-            None => {}
-        }
+        // check if the name of Virtual Router being entered is unique 
+        if let Some(con) = result.iter().find(|r: &&FileConfig| r.name == file_config.name) {
+            log::warn!("Configs for Virtual Router with name {:?} already exist. Will be ignored", con.name);
+            continue
+        };
 
-        // check if configs with same VRID exist
-        match result.iter().find(|r: &&FileConfig| r.vrid == file_config.vrid) {
-            Some(con) => {
-                log::warn!("Configs for Virtual Router with VRID {:?} already exist. Will be ignored", con.vrid);
-                continue
-            }, 
-            None => {}
-        }
+        // check if VRID of the Virtual Router being entered is unique 
+        if let Some(con) = result.iter().find(|r: &&FileConfig| r.vrid == file_config.vrid) {
+            log::warn!("Configs for Virtual Router with VRID {:?} already exist. Will be ignored", con.vrid);
+            continue
+        };
         result.push(file_config);
     }
 
