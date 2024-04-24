@@ -115,8 +115,6 @@ impl VrrpConfig {
 }
 
 
-
-
 const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 {
     \"name\": \"VR_1\",
@@ -132,7 +130,7 @@ const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 ";
 
 
-pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
+pub fn parse_cli_opts(args: &[String]) -> Result<Vec<VrrpConfig>, OptError>{
     let mut opts = Options::new();
 
     opts.optflag("H", "help", "display help information");
@@ -278,23 +276,8 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
                 None => Action::Run
             }
         };
-
-        // match matches.opt_str("action") {
-        //     Some(x) => {
-        //         if ["teardown"].contains(&x.to_lowercase().as_str()){
-        //             virtual_address_action("delete", &cli_config.ip_addresses, &cli_config.interface_name);
-        //             std::process::exit(0);
-        //         } else {
-        //             return Result::Err(OptError("--action has to be ether 'run' or 'teardown' . If none is specified, run will be default.".into()));
-        //         }
-        //     }
-        //     None => {
-        //         // should have 'run' as action by default if nothing is specified.  
-        //     }
-        // }
-
-
-        Ok(VrrpConfig::Cli(cli_config))
+        
+        Ok(vec![VrrpConfig::Cli(cli_config)])
     } else {
 
         let filename = if matches.opt_str("file").is_some() { 
@@ -319,44 +302,55 @@ pub fn parse_cli_opts(args: &[String]) -> Result<VrrpConfig, OptError>{
             }
             file_path.to_string()
         };
-        let file_config = match read_config_from_json_file(&filename) {
-            Ok(mut config) => {
-                config.action = match matches.opt_str("action") {
 
-                    Some (x) => {
-                        let act = x.to_lowercase(); 
-                        if act == "teardown" {
-                            Action::Teardown
-                        } else if act == "run" {
-                            Action::Run
-                        } else {
-                            log::warn!("{x} is not a valid action, therefore resulted to default 'run' action");
+        let mut configs: Vec<VrrpConfig> = vec![];
+        let file_configs = read_json_config(&filename);
+
+        match file_configs {
+            Ok(config) => {
+                for mut c in config {
+                    c.action = match matches.opt_str("action") {
+                        Some(x) => {
+                            let act = x.to_lowercase(); 
+                            if act == "teardown" {
+                                Action::Teardown
+                            } else if act == "run" {
+                                Action::Run
+                            } else {
+                                log::warn!("{x} is not a valid action, therefore resulted to default 'run' action");
+                                Action::Run
+                            }
+                        },
+                        None => {
                             Action::Run
                         }
-                    }
-                    
-                    None => {
-                        Action::Run
-                    }
-                };
-                VrrpConfig::File(config)
-            },
+                    };
+                    configs.push(VrrpConfig::File(c));
+                }
+            }, 
             Err(err) => {
                 log::error!("{err}");
-                return  Result::Err(OptError(format!("Problem Parsing file {}", &filename)))
+                return Result::Err(OptError(format!("Problem parsing file {}", &filename)))
             }
-        };
-        Ok(file_config)
+        }
+
+        Ok(configs)
 
     } 
 }
 
 
-fn read_config_from_json_file<P: AsRef<Path>>(path: P) -> Result<FileConfig, Box<dyn std::error::Error>> 
+fn read_json_config<P: AsRef<Path>>(path: P) -> Result<Vec<FileConfig>, Box<dyn std::error::Error>> 
 {
     log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let u = serde_json::from_reader(reader)?;
-    Ok(u)
+    let mut result = vec![];
+
+    
+    let list_file_configs: Vec<FileConfig> = serde_json::from_reader(reader)?;
+    for file_config in list_file_configs {
+        result.push(file_config.clone());
+    }
+    Ok(result)
 }

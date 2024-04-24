@@ -16,7 +16,7 @@ mod state_machine;
 mod pkt;
 mod checksum;
 
-pub type NetResult<T> = Result<T, NetError>;
+pub(crate) type NetResult<T> = Result<T, NetError>;
 
 #[derive(Clone)]
 pub(crate) struct TaskItems {

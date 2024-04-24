@@ -5,7 +5,8 @@ use pnet::datalink::{self, Channel, DataLinkReceiver, DataLinkSender, NetworkInt
 use ipnet::Ipv4Net;
 use rand::{distributions::Alphanumeric, Rng};
 
-pub(crate) fn get_interface(name: &str) -> NetworkInterface {
+pub(crate) fn get_interface(name: &str) -> NetworkInterface
+{
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
     let interfaces = datalink::linux::interfaces();
 
@@ -20,7 +21,6 @@ pub(crate) fn create_datalink_channel(interface: &NetworkInterface) -> NetResult
     match pnet::datalink::channel(interface, Default::default()) {
         Ok(Channel::Ethernet(tx, rx)) => Ok((tx, rx)),
         Ok(_) => {
-
             Err(NetError("Unknown channel type".to_string()))
         }
         Err(err) => {
@@ -33,7 +33,8 @@ pub(crate) fn create_datalink_channel(interface: &NetworkInterface) -> NetResult
 
 // takes the configs that have been received and converts them 
 // into a virtual router instance. 
-pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
+pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter
+{
 
     // SKEW TIME = (256 * priority) / 256
     let skew_time: f32 = (256_f32 - conf.priority() as f32) / 256_f32;
@@ -86,7 +87,8 @@ pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interfa
 }
 
 
-pub(crate) fn random_string(length: usize) -> String {
+pub(crate) fn random_string(length: usize) -> String 
+{
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(length)
