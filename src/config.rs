@@ -1,7 +1,7 @@
-use std::{env, fs::{self, File}, io::{BufReader, Write}, path::Path};
+use std::{env, ffi::OsStr, fs::{self, File}, io::{BufReader, Write}, path::Path};
 use getopts::Options;
 use serde::{Deserialize, Serialize};
-use crate::{error::OptError, general::random_string};
+use crate::{error::OptError, general::random_string, OptResult};
 
 
 fn default_priority() -> u8 { 100 }
@@ -329,8 +329,7 @@ pub fn parse_cli_opts(args: &[String]) -> Result<Vec<VrrpConfig>, OptError>{
                     configs.push(VrrpConfig::File(c));
                 }
             }, 
-            Err(err) => {
-                log::error!("{err}");
+            Err(_) => {
                 return Result::Err(OptError(format!("Problem parsing file {}", &filename)))
             }
         }
@@ -341,15 +340,33 @@ pub fn parse_cli_opts(args: &[String]) -> Result<Vec<VrrpConfig>, OptError>{
 }
 
 
-fn read_json_config<P: AsRef<Path>>(path: P) -> Result<Vec<FileConfig>, Box<dyn std::error::Error>> 
+fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> 
 {
-    log::info!("Reading from config file {:?}", path.as_ref().as_os_str());
-    let file = File::open(path)?;
+    let path_str = path.as_ref().as_os_str();
+
+    log::info!("Reading from config file {:?}", path_str);
+    let file = match File::open(path_str) {
+        Ok(f) => f,
+        Err(_) => {
+            log::error!("Unable to open file {:?}", path.as_ref().as_os_str());
+            return Err(OptError(format!("unable to open file `{:?}`", path.as_ref().as_os_str())))
+        }
+    };
+    
     let reader = BufReader::new(file);
     let mut result = vec![];
 
     
-    let list_file_configs: Vec<FileConfig> = serde_json::from_reader(reader)?;
+    let list_file_configs: Vec<FileConfig> = match serde_json::from_reader(reader) {
+        Ok(config) => config,
+        Err(_) => {
+            match single_file_config(path_str) {
+                Ok(conf) => conf,
+                Err(err) => return  Err(err)
+            }
+        }
+    };
+    
     for file_config in list_file_configs {
         
         // check if configs with same VR name exist
@@ -373,4 +390,23 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> Result<Vec<FileConfig>, Box<dyn 
     }
 
     Ok(result)
+}
+
+fn single_file_config(path: &OsStr) -> OptResult<Vec<FileConfig>> {
+
+    // this single file config method is called only after 
+    // the normal config fails, which it does after reading the file. 
+    // thus unwrap()'ing here is safe. 
+    let file = File::open(path).unwrap();
+
+    let reader = BufReader::new(file);
+    let _: FileConfig = match serde_json::from_reader(reader) {
+        Ok(config) => return Ok(vec![config]),
+        Err(_) => {
+            log::error!("Wrong configurations for file {:?}", path);
+            return Err(OptError(format!("Wrong config formatting in file {:?}", path)))
+        }
+    };
+
+
 }

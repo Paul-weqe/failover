@@ -12,11 +12,11 @@ use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
 use ipnet::Ipv4Net;
 
 use crate::{checksum, error::NetError, general::virtual_address_action, observer::EventObserver, pkt::generators, state_machine::Event, NetResult};
-use pnet::packet::{
+use pnet::{datalink, packet::{
     arp::{ ArpHardwareTypes, ArpOperations, ArpPacket, MutableArpPacket }, 
     ethernet::{ EtherTypes, EthernetPacket, MutableEthernetPacket }, 
     ipv4::Ipv4Packet, Packet
-};
+}};
 use vrrp_packet::VrrpPacket;
 use crate::{ 
     router::VirtualRouter, 
@@ -140,17 +140,17 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
     //      - this should be changed to looking through all the IP addresses in the device. 
     // }
     // received packets from the same device
-    match interface.ips.first() {
-        Some(ip) => {
-            if ip.ip() == ip_packet.get_source() { 
-                return Ok(()) 
+    for interface in datalink::interfaces().iter() {
+        match interface.ips.first() {
+            Some(ip) => {
+                if ip.ip() == ip_packet.get_source() { 
+                    return Ok(()) 
+                }
             }
-        }
-        None => {
-            log::warn!("IP addresses have not ");
-            return Ok(())
+            None => { }
         }
     }
+    
 
     // MUST DO verifications(rfc3768 section 7.1)
     {

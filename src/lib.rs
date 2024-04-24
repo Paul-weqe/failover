@@ -1,5 +1,5 @@
 use std::{io, sync::{Arc, Mutex}, thread};
-use error::NetError;
+use error::{NetError, OptError};
 use general::get_interface;
 use observer::EventObserver;
 use pkt::generators::{self, MutablePktGenerator};
@@ -17,6 +17,7 @@ mod pkt;
 mod checksum;
 
 pub(crate) type NetResult<T> = Result<T, NetError>;
+pub(crate) type OptResult<T> = Result<T, OptError>;
 
 #[derive(Clone)]
 pub(crate) struct TaskItems {
