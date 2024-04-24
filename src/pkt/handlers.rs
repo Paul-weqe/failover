@@ -27,9 +27,25 @@ use crate::{
 
 pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: Arc<Mutex<VirtualRouter>>) -> NetResult<()>{
 
-    let vrouter = vrouter.lock().unwrap();
+    let vrouter = match vrouter.lock() {
+        Ok(vr) => vr, 
+        Err(err) => {
+            log::warn!("Unable to create mutex lock for vrouter");
+            return Err(NetError(format!("Unable to create mutex lock for vrouter\n\n {err}")))
+        }
+    };
     let interface = get_interface(&vrouter.network_interface);
-    let arp_packet = ArpPacket::new(eth_packet.payload()).unwrap();
+    let arp_packet = match ArpPacket::new(eth_packet.payload()) {
+        Some(pkt) => pkt,
+        None => return Ok(())
+    };
+    let interface_mac = match interface.clone().mac {
+        Some(mac) => mac,
+        None => {
+            log::warn!("interface {} does not have mac address. Unable to continue with incoming VRRP packet checks", &interface.name);
+            return Ok(())
+        }
+    };
     
     match vrouter.fsm.state {
         States::Init => {}
@@ -45,7 +61,8 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             // !TODO
             // MUST discard packets with a destination link layer MAC address
             // equal to the virtual router MAC address.
-            if arp_packet.get_target_hw_addr() == interface.mac.unwrap() {
+            if arp_packet.get_target_hw_addr() == interface_mac {
+                return Ok(())
             }
         }
 
@@ -55,30 +72,34 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
             for ip in &vrouter.ip_addresses {
                 if ip.addr() == arp_packet.get_target_proto_addr() {
                     let (mut sender, _) = create_datalink_channel(&interface)?;
+                    
 
                     // respond to arp request
                     let mut ethernet_buffer = [0u8; 42];
                     let mut arp_buffer = [0u8; 28];
-                    let mut outgoing_ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
+                    let mut outgoing_ethernet_packet = match MutableEthernetPacket::new(&mut ethernet_buffer) {
+                        Some(pkt) => pkt,
+                        None => return Ok(())
+                    };
                     outgoing_ethernet_packet.set_destination(eth_packet.get_source());
-                    outgoing_ethernet_packet.set_source(interface.clone().mac.unwrap());
+                    outgoing_ethernet_packet.set_source(interface_mac);
 
-                    let mut outgoing_arp_packet = MutableArpPacket::new(&mut arp_buffer).unwrap();
+                    let mut outgoing_arp_packet = match MutableArpPacket::new(&mut arp_buffer){
+                        Some(pkt) => pkt,
+                        None => return Ok(())
+                    };
                     outgoing_arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
                     outgoing_arp_packet.set_protocol_type(EtherTypes::Ipv4);
                     outgoing_arp_packet.set_hw_addr_len(6);
                     outgoing_arp_packet.set_proto_addr_len(4);
                     outgoing_arp_packet.set_operation(ArpOperations::Reply);
                     outgoing_arp_packet.set_target_hw_addr(arp_packet.get_sender_hw_addr());
-                    outgoing_arp_packet.set_sender_hw_addr(interface.clone().mac.unwrap());
+                    outgoing_arp_packet.set_sender_hw_addr(interface_mac);
                     outgoing_arp_packet.set_target_proto_addr(arp_packet.get_sender_proto_addr());
                     outgoing_arp_packet.set_sender_proto_addr(arp_packet.get_target_proto_addr());
                     outgoing_ethernet_packet.set_payload(outgoing_arp_packet.packet());
 
-                    sender
-                        .send_to(outgoing_ethernet_packet.packet(), Some(interface.clone()))
-                        .unwrap()
-                        .unwrap();
+                    sender.send_to(outgoing_ethernet_packet.packet(), Some(interface.clone()));
                 }
             }
         }
@@ -89,18 +110,48 @@ pub(crate) fn handle_incoming_arp_pkt(eth_packet: &EthernetPacket<'_>, vrouter: 
 
 pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_mutex: Arc<Mutex<VirtualRouter>>) -> NetResult<()>{
 
-    let mut vrouter = vrouter_mutex.lock().unwrap();
+    let mut vrouter = match vrouter_mutex.lock() {
+        Ok(vr) => vr,
+        Err(err) => {
+            log::warn!("problem fetching vrouter mutex. \n{err}");
+            return Ok(())
+        }
+    };
     let interface = get_interface(&vrouter.network_interface);
-    let ip_packet = Ipv4Packet::new(eth_packet.payload()).unwrap();
-    let vrrp_packet = VrrpPacket::new(ip_packet.payload()).unwrap();
+    let ip_packet = match Ipv4Packet::new(eth_packet.payload()) {
+        Some(pkt) => pkt,
+        None => {
+            log::warn!("Unable to read incoming IP packet");
+            return Ok(())
+        }
+    };
+
+    let vrrp_packet = match VrrpPacket::new(ip_packet.payload()){
+        Some(pkt) => pkt,
+        None => {
+            log::warn!("Unable to read incoming VRRP packet");
+            return Ok(())
+        }
+    };
     let mut error ;
 
-
-    if interface.ips.first().unwrap().ip() == ip_packet.get_source() {
-        // received packets from the same device
-        return Ok(())
+    // TODO {
+    //      - currently we are looking at the first IP address of the interface that is sending the data.
+    //      - this should be changed to looking through all the IP addresses in the device. 
+    // }
+    // received packets from the same device
+    match interface.ips.first() {
+        Some(ip) => {
+            if ip.ip() == ip_packet.get_source() { 
+                return Ok(()) 
+            }
+        }
+        None => {
+            log::warn!("IP addresses have not ");
+            return Ok(())
+        }
     }
-    
+
     // MUST DO verifications(rfc3768 section 7.1)
     {
         
@@ -182,9 +233,18 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
         for (counter, octet) in vrrp_packet.get_ip_addresses().iter().enumerate() {
             addr.push(*octet);
             if (counter + 1) % 4 == 0 {
-                let ip = Ipv4Net::new(
+                
+                let ip = match Ipv4Net::new(
                     Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), 24
-                ).unwrap().addr();
+                ) {
+                    Ok(ip) => ip.addr(),
+                    Err(err) => {
+                        log::error!("Invalid IP on incoming VRRP packet: {:?}", octet);
+                        log::error!("{err}");
+                        return Ok(())
+                    }
+
+                };
                 if !vrouter.ipv4_addresses().contains(&ip) {
                     log::error!("({}) IP address {:?} for incoming VRRP packet not found in local config", vrouter.name, ip);
                     addr_check = false;
@@ -236,7 +296,13 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
         }
         
         States::Master => {
-            let incoming_ip_pkt = Ipv4Packet::new(eth_packet.payload()).unwrap(); 
+            let incoming_ip_pkt = match Ipv4Packet::new(eth_packet.payload()) {
+                Some(pkt) => pkt,
+                None => {
+                    log::warn!("Problem processing incoming IP packet");
+                    return Err(NetError("Problem processing incoming IP packet".to_string()))
+                }
+            };
             let adv_priority_gt_local_priority = vrrp_packet.get_priority() > vrouter.priority;
             let adv_priority_eq_local_priority = vrrp_packet.get_priority() == vrouter.priority;
             let _send_ip_gt_local_ip = incoming_ip_pkt.get_source() > incoming_ip_pkt.get_destination();
@@ -261,10 +327,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(eth_packet: &EthernetPacket<'_>, vrouter_
                 let mut eth_packet = mut_pkt_generator.gen_vrrp_eth_packet(&mut eth_buff);
                 eth_packet.set_payload(ip_packet.packet());
 
-                sender
-                    .send_to(eth_packet.packet(), None)
-                    .unwrap()
-                    .unwrap();
+                sender.send_to(eth_packet.packet(), None);
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
                 

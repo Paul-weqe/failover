@@ -1,4 +1,4 @@
-workspace = { members = [ "tun-tap", "vrrp_packet"] }
+workspace = { members = [ "vrrp_packet"] }
 [package]
 name = "failover"
 version = "0.2.5"
