@@ -1,4 +1,4 @@
-use std::{io, sync::{Arc, Mutex}, thread};
+use std::sync::{Arc, Mutex};
 use error::{NetError, OptError};
 use general::get_interface;
 use observer::EventObserver;
