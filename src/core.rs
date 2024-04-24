@@ -14,7 +14,8 @@ use pnet::packet::{
     ethernet::{ EtherTypes, EthernetPacket }, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
 use crate::{
-    general::create_datalink_channel, observer::EventObserver, pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt},
+    general::create_datalink_channel, observer::EventObserver, 
+    pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt},
     state_machine::{Event, States}, NetResult
 };
 use crate::checksum;
