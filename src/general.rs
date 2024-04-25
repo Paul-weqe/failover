@@ -48,7 +48,7 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter
     let mut ips: Vec<Ipv4Net> = vec![];
 
     if conf.ip_addresses().len() > 20 {
-        log::warn!("({})  More than 20 IP addresses(max for VRRP) have been configured. Only first 20 addresses will be considered. ", conf.name());
+        log::warn!("({})  More than 20 IP addresses(max for VRRP) have been configured. Only first 20 addresses will be used..", conf.name());
     }
 
     let addresses = if conf.ip_addresses().len() <= 20 { conf.ip_addresses() } else { conf.ip_addresses()[0..20].to_vec() }; 

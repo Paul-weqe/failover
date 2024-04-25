@@ -20,6 +20,7 @@ mod checksum;
 pub(crate) type NetResult<T> = Result<T, NetError>;
 pub(crate) type OptResult<T> = Result<T, OptError>;
 
+
 #[derive(Clone)]
 pub(crate) struct TaskItems {
     vrouter: Arc<Mutex<VirtualRouter>>,
@@ -29,7 +30,7 @@ pub(crate) struct TaskItems {
 pub mod error{
     use std::{error::Error, fmt::Display};
 
-    // error 
+    // Network errors 
     #[derive(Debug)]
     pub struct NetError(pub String);
     impl Error for NetError {}
@@ -84,7 +85,9 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
     tasks_set.spawn(async {
         core::timer_process(timer_items).await
     });
-    while let Some(_) = tasks_set.join_next().await {
+    
+    while tasks_set.join_next().await.is_some() {
+        // join tasks
     }
     
     Ok(())

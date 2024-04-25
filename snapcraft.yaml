@@ -1,5 +1,5 @@
 name: failover
-version: '0.3.0'
+version: '0.3.1'
 summary: A rust implementation of VRRP
 description: |
   Failover is a rust implementation of the VRRP protocol. 
@@ -20,6 +20,6 @@ parts:
 
 apps:
   main:
-    command: bin/failover
+    command: bin/failover file-mode
     daemon: simple 
-    post-stop-command: bin/failover --action teardown
+    post-stop-command: bin/failover file-mode --action teardown

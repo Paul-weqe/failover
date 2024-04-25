@@ -1,7 +1,7 @@
 workspace = { members = [ "vrrp_packet"] }
 [package]
 name = "failover"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,10 +17,10 @@ rand = "0.8.5"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 simple_logger = "4.3.3"
-getopts = "0.2"
 libc = "0.2.153"
 tokio = { version = "1.37.0", features = ["full"]}
 tokio-stream = { version = "0.1.15", features = ["full"]}
+clap = { version = "4.5.4", features = ["derive"] }
 
 [lib]
 doctest = false
