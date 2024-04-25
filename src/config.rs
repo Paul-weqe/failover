@@ -48,25 +48,25 @@ enum Mode {
         filename: Option<String>
     },
     CliMode {
-        #[arg(long)]
+        #[arg(long, help="The name of the Virtual Router Instance. e.g `VR_1`")]
         name: Option<String>,
 
-        #[arg(long)]
+        #[arg(long, help="Virtual Router ID of the Virtual router instance. ")]
         vrid: u8,
 
-        #[arg(long, num_args=1..)]
+        #[arg(long, num_args=1.., help="The IP Address(es) of that will the Virtual router will be assigned. Can be more than one. ")]
         ip_address: Vec<String>,
 
-        #[arg(long)]
+        #[arg(long, help="name of the network interface where the Virtual Router instance will be attached. ")]
         interface_name: String,
 
-        #[arg(long, default_value="100")]
+        #[arg(long, default_value="100", help="The priority of this instance of the Virtual Router, maximum of 255. The higher priority is chosen to be MASTER.")]
         priority: u8,
 
-        #[arg(long, default_value="1")]
+        #[arg(long, default_value="1", help="Interval(in seconds) between which the priodic advert updates are sent (when MASTER). Also used to calculate MasterDown interval when in BACKUP state.")]
         advert_interval: u8,
 
-        #[arg(long, action)]
+        #[arg(long, action, help="(highly adviced to be called). When true, the higher priority will always preempt the lower priority.")]
         preempt_mode: bool
     }
 }
@@ -82,7 +82,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
     match args.mode {
         Mode::FileMode { filename } => {
             
-            // generate file path based on given default directories
+            // generate file path if none is given
             let fpath = match filename {
                 None => {
                     // get default file path and create new directory if it does not exist
@@ -97,12 +97,12 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
                 Some(f) => f
             };
 
-            // create file if it does not exist
+            // create the config file (if it does not exist)
             if !Path::new(&fpath).exists() {
                 let mut file = File::create(&fpath).unwrap();
                 let _ = file.write_all(DEFAULT_JSON_CONFIG);
             }
-
+            
             let mut configs: Vec<VrrpConfig> = vec![];
             
             match read_json_config(&fpath) {
