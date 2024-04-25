@@ -9,10 +9,11 @@
 /// 
 /// 
 
-use std::{io, sync::Arc, time::Instant};
+use std::{io, sync::Arc, time::{Duration, Instant}};
 use pnet::packet::{
     ethernet::{ EtherTypes, EthernetPacket }, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, Packet
 };
+use tokio::time;
 use crate::{
     general::create_datalink_channel, observer::EventObserver, 
     pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt},
@@ -24,7 +25,7 @@ use crate::checksum;
 /// Waits for network connections and does the necessary actions. 
 /// Acts on the queries mostly described from the state machine 
 /// in chapter 6.3 onwards ofRFC 3768
-pub(crate) fn network_process(items: crate::TaskItems) -> NetResult<()> {
+pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
     // NetworkInterface
     let interface = items.generator.interface;
 
@@ -109,14 +110,17 @@ pub(crate) fn network_process(items: crate::TaskItems) -> NetResult<()> {
 
 /// Used to track the various timers: (MasterDownTimer and Advertimer)
 /// Has been explained in RFC 3768 section 6.2
-pub(crate) fn timer_process(items: crate::TaskItems) -> NetResult<()> {
+pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
 
     let generator = items.generator;
     let (mut sender, _receiver) = create_datalink_channel(&generator.interface)?;
 
+    let mut interval = time::interval(Duration::from_millis(100));
     let vrouter = items.vrouter;
 
     loop {
+
+        interval.tick().await;
         let mut vrouter = match vrouter.lock() {
             Ok(vrouter) => vrouter,
             Err(_) => {
