@@ -4,6 +4,21 @@ use crate::{error::OptError, general::random_string, OptResult};
 use clap::{Parser, Subcommand};
 
 
+
+const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
+{
+    \"name\": \"VR_1\",
+    \"vrid\": 51,
+    \"interface_name\": \"wlo1\",
+    \"ip_addresses\": [
+        \"192.168.100.100/24\"
+    ],
+    \"priority\": 101,
+    \"advert_interval\": 1,
+    \"preempt_mode\": true
+}
+";
+
 fn default_priority() -> u8 { 100 }
 fn default_advert_int() -> u8 { 1 }
 fn default_preempt_mode() -> bool { true }
@@ -246,19 +261,6 @@ impl VrrpConfig {
 }
 
 
-const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
-{
-    \"name\": \"VR_1\",
-    \"vrid\": 51,
-    \"interface_name\": \"wlo1\",
-    \"ip_addresses\": [
-        \"192.168.100.100/24\"
-    ],
-    \"priority\": 101,
-    \"advert_interval\": 1,
-    \"preempt_mode\": true
-}
-";
 
 fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> 
 {
