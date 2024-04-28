@@ -33,4 +33,33 @@ impl VirtualRouter {
         }
         addrs
     } 
+
+    pub fn new(
+        name: String,
+        vrid: u8, 
+        ip_addresses: Vec<Ipv4Net>, 
+        priority: u8, 
+        advert_interval: u8, 
+        preempt_mode: bool, 
+        network_interface: String
+    ) -> Self {
+
+        // SKEW TIME = (256 * priority) / 256
+        let skew_time: f32 = (256_f32 - priority as f32) / 256_f32;
+        // MASTER DOWN INTERVAL = (3 * ADVERTISEMENT INTERVAL ) + SKEW TIME 
+        let master_down_interval: f32 = (3_f32 * advert_interval as f32) + skew_time;
+
+        Self {
+            name, 
+            vrid, 
+            ip_addresses, 
+            priority, 
+            skew_time, 
+            advert_interval, 
+            master_down_interval, 
+            preempt_mode,
+            network_interface,
+            fsm: VirtualRouterMachine::default() 
+        }
+    }
  }

@@ -2,9 +2,9 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default)]
 pub struct VirtualRouterMachine {
-    pub timer: Timer,
-    pub state: States,
-    pub event: Event
+    pub(crate) timer: Timer,
+    pub(crate) state: States,
+    pub(crate) event: Event
 }
 
 
@@ -38,7 +38,7 @@ impl VirtualRouterMachine {
 
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub enum States {
+pub(crate) enum States {
     #[default]
     Init, 
     Backup, 
@@ -46,7 +46,7 @@ pub enum States {
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub struct Timer {
+pub(crate) struct Timer {
     pub t_type: TimerType,
     pub remaining_time: f32,
     pub waiting_for: Option<Instant>
@@ -54,7 +54,7 @@ pub struct Timer {
 
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub enum TimerType {
+pub(crate) enum TimerType {
     #[default]
     Null,
 
@@ -64,7 +64,7 @@ pub enum TimerType {
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum Event {
+pub(crate) enum Event {
     #[default]
     Startup,
 

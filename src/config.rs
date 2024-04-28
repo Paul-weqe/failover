@@ -1,6 +1,7 @@
 use std::{env, ffi::OsStr, fs::{self, File}, io::{BufReader, Write}, path::Path};
+use ipnet::Ipv4Net;
 use serde::{Deserialize, Serialize};
-use crate::{error::OptError, general::random_string, OptResult};
+use crate::{error::OptError, general::random_vr_name, OptResult};
 use clap::{Parser, Subcommand};
 
 
@@ -31,7 +32,7 @@ pub struct FileConfig {
     pub ip_addresses: Vec<String>,
     pub interface_name: String,
 
-    #[serde(default="random_string")]
+    #[serde(default="random_vr_name")]
     pub name: String,
     #[serde(default = "default_priority")]
     pub priority: u8,
@@ -41,6 +42,106 @@ pub struct FileConfig {
     pub preempt_mode: bool,
     #[serde(default = "default_action")]
     pub action: Action
+}
+
+
+#[derive(Debug, Clone)]
+pub struct CliConfig {
+    pub name: Option<String>,
+    pub vrid: u8,
+    pub ip_addresses: Vec<String>,
+    pub interface_name: String,
+
+    pub priority: u8,
+    pub advert_interval: u8,
+    pub preempt_mode: bool,
+    pub action: Action
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseConfig {
+    pub name: Option<String>,
+    pub vrid: u8,
+    pub ip_addresses: Vec<Ipv4Net>,
+    pub interface_name: String,
+    pub priority: u8,
+    pub advert_interval: u8,
+    pub preempt_mode: bool,
+    pub action: Action
+}
+
+// pub struct 
+
+#[derive(Debug, Clone)]
+pub enum VrrpConfig {
+    File(FileConfig),
+    Cli(CliConfig)
+}
+
+impl VrrpConfig {
+
+    // for name, if not specified, we will generate a random name (VR-{random-string})
+    pub fn name(&self) -> String {
+        let name = match self { 
+            VrrpConfig::File(config) => Some(config.name.clone()),
+            VrrpConfig::Cli(config) => config.name.clone(),
+            // VrrpConfig::Base(config) => config.name.unwrap()
+        };
+        match name {
+            Some(n) => n,
+            None => random_vr_name()
+        }   
+    }
+    
+    pub fn vrid(&self) -> u8 {
+        match self {
+            VrrpConfig::File(config) => config.vrid,
+            VrrpConfig::Cli(config) => config.vrid
+        }
+    }
+
+    pub fn ip_addresses(&self) -> Vec<String> {
+        match self {
+            VrrpConfig::File(config) => config.ip_addresses.clone(),
+            VrrpConfig::Cli(config) => config.ip_addresses.clone()
+        }
+    }
+
+    // if interface name has not been specified, we will create one with format: ( fover-{random-string} )
+    pub fn interface_name(&self) -> String {
+        match self {
+            VrrpConfig::File(config) => config.interface_name.clone(),
+            VrrpConfig::Cli(config) => config.interface_name.clone()
+        }
+    }
+
+    pub fn priority(&self) -> u8 {
+        match self {
+            VrrpConfig::File(config) => config.priority,
+            VrrpConfig::Cli(config) => config.priority
+        }
+    }
+
+    pub fn advert_interval(&self) -> u8 {
+        match self {
+            VrrpConfig::File(config) => config.advert_interval,
+            VrrpConfig::Cli(config) => config.advert_interval
+        }
+    }
+
+    pub fn preempt_mode(&self) -> bool {
+        match self {
+            VrrpConfig::File(config) => config.preempt_mode,
+            VrrpConfig::Cli(config) => config.preempt_mode
+        }
+    }
+
+    pub fn action(&self) -> Action {
+        match self {
+            VrrpConfig::File(config) => config.action.clone(),
+            VrrpConfig::Cli(config) => config.action.clone()
+        }
+    }
 }
 
 
@@ -149,7 +250,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             priority, advert_interval, preempt_mode 
         } => {
             if name.is_none() {
-                name = Some(random_string());
+                name = Some(random_vr_name());
             };
 
 
@@ -173,91 +274,6 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             Ok(vec![VrrpConfig::Cli(config)])
         }
     }   
-}
-
-#[derive(Debug, Clone)]
-pub struct CliConfig {
-    pub name: Option<String>,
-    pub vrid: u8,
-    pub ip_addresses: Vec<String>,
-    pub interface_name: String,
-
-    pub priority: u8,
-    pub advert_interval: u8,
-    pub preempt_mode: bool,
-    pub action: Action
-}
-
-
-#[derive(Debug, Clone)]
-pub enum VrrpConfig {
-    File(FileConfig),
-    Cli(CliConfig)
-}
-
-impl VrrpConfig {
-
-    // for name, if not specified, we will generate a random name (VR-{random-string})
-    pub fn name(&self) -> String {
-        let name = match self { 
-            VrrpConfig::File(config) => Some(config.name.clone()),
-            VrrpConfig::Cli(config) => config.name.clone()
-        };
-        match name {
-            Some(n) => n,
-            None => random_string()
-        }   
-    }
-    
-    pub fn vrid(&self) -> u8 {
-        match self {
-            VrrpConfig::File(config) => config.vrid,
-            VrrpConfig::Cli(config) => config.vrid
-        }
-    }
-
-    pub fn ip_addresses(&self) -> Vec<String> {
-        match self {
-            VrrpConfig::File(config) => config.ip_addresses.clone(),
-            VrrpConfig::Cli(config) => config.ip_addresses.clone()
-        }
-    }
-
-    // if interface name has not been specified, we will create one with format: ( fover-{random-string} )
-    pub fn interface_name(&self) -> String {
-        match self {
-            VrrpConfig::File(config) => config.interface_name.clone(),
-            VrrpConfig::Cli(config) => config.interface_name.clone()
-        }
-    }
-
-    pub fn priority(&self) -> u8 {
-        match self {
-            VrrpConfig::File(config) => config.priority,
-            VrrpConfig::Cli(config) => config.priority
-        }
-    }
-
-    pub fn advert_interval(&self) -> u8 {
-        match self {
-            VrrpConfig::File(config) => config.advert_interval,
-            VrrpConfig::Cli(config) => config.advert_interval
-        }
-    }
-
-    pub fn preempt_mode(&self) -> bool {
-        match self {
-            VrrpConfig::File(config) => config.preempt_mode,
-            VrrpConfig::Cli(config) => config.preempt_mode
-        }
-    }
-
-    pub fn action(&self) -> Action {
-        match self {
-            VrrpConfig::File(config) => config.action.clone(),
-            VrrpConfig::Cli(config) => config.action.clone()
-        }
-    }
 }
 
 

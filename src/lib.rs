@@ -1,3 +1,4 @@
+
 use std::sync::{Arc, Mutex};
 use error::{NetError, OptError};
 use general::get_interface;
@@ -10,16 +11,15 @@ use tokio::task::JoinSet;
 
 pub mod general;
 pub mod config;
+pub mod router;
 mod observer;
-mod core;
-mod router;
+mod core_tasks;
 mod state_machine;
 mod pkt;
 mod checksum;
 
 pub(crate) type NetResult<T> = Result<T, NetError>;
 pub(crate) type OptResult<T> = Result<T, OptError>;
-
 
 #[derive(Clone)]
 pub(crate) struct TaskItems {
@@ -78,12 +78,12 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
     // sync process listens for any incoming network requests
     let network_items = items.clone();
     tasks_set.spawn(async {
-        core::network_process(network_items).await
+        core_tasks::network_process(network_items).await
     });
 
     let timer_items = items.clone();
     tasks_set.spawn(async {
-        core::timer_process(timer_items).await
+        core_tasks::timer_process(timer_items).await
     });
     
     while tasks_set.join_next().await.is_some() {
@@ -91,4 +91,5 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
     }
     
     Ok(())
+    
 }
