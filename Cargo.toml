@@ -1,9 +1,15 @@
 workspace = { members = [ "vrrp_packet"] }
+
 [package]
 name = "failover"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = [ "Paul-weqe <paul1tw1@gmail.com>" ]
+description = "VRRP implementation library (and binary installation) in Rust."
+license = "MIT"
+repository = "https://github.com/Paul-weqe/failover"
+keywords = [ "vrrp", "network", "libpnet", "RFC" ]
+documentation = "https://failover-docs.readthedocs.io/"
 
 [dependencies]
 vrrp_packet = { path = "vrrp_packet", version = "0.1.0" }

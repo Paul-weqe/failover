@@ -1,5 +1,5 @@
 name: failover
-version: '0.3.1'
+version: '0.3.2'
 summary: A rust implementation of VRRP
 description: |
   Failover is a rust implementation of the VRRP protocol. 
