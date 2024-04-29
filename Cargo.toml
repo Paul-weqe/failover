@@ -13,7 +13,7 @@ documentation = "https://failover-docs.readthedocs.io/en/latest/install.html#run
 
 
 [dependencies]
-vrrp_packet = { path = "vrrp_packet", version = "0.1.0" }
+vrrp_packet = { path = "./vrrp_packet", version = "0.1.0" }
 byteorder = "1.5.0"
 ipnet = { version = "2.9.0", features = ["serde"]}
 log = "0.4.21"
