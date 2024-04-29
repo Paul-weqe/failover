@@ -1,7 +1,7 @@
 workspace = { members = [ "vrrp_packet"] }
 
 [package]
-name = "failover"
+name = "failover_vr"
 version = "0.3.2"
 edition = "2021"
 authors = [ "Paul-weqe <paul1tw1@gmail.com>" ]
@@ -9,14 +9,14 @@ description = "VRRP implementation library (and binary installation) in Rust."
 license = "MIT"
 repository = "https://github.com/Paul-weqe/failover"
 keywords = [ "vrrp", "network", "libpnet", "RFC" ]
-documentation = "https://failover-docs.readthedocs.io/"
+documentation = "https://failover-docs.readthedocs.io/en/latest/install.html#running-as-library-in-rust"
+
 
 [dependencies]
 vrrp_packet = { path = "vrrp_packet", version = "0.1.0" }
 byteorder = "1.5.0"
 ipnet = { version = "2.9.0", features = ["serde"]}
 log = "0.4.21"
-network-interface = "1.1.1"
 pnet = "0.34.0"
 rand = "0.8.5"
 serde = { version = "1.0.197", features = ["derive"] }
@@ -24,7 +24,6 @@ serde_json = "1.0.114"
 simple_logger = "4.3.3"
 libc = "0.2.153"
 tokio = { version = "1.37.0", features = ["full"]}
-tokio-stream = { version = "0.1.15", features = ["full"]}
 clap = { version = "4.5.4", features = ["derive"] }
 
 [lib]

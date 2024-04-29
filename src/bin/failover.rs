@@ -1,5 +1,5 @@
 use clap::Parser;
-use failover::{config::{parse_cli_opts, CliArgs}, general::config_to_vr};
+use failover_vr::{config::{parse_cli_opts, CliArgs}, general::config_to_vr};
 use tokio::task::JoinSet;
 use simple_logger::SimpleLogger;
 
@@ -20,7 +20,7 @@ async fn main(){
     for config in routers_config {
         let vrouter = config_to_vr(config);
         routers_tasks.spawn(async {
-            failover::run(vrouter).await
+            failover_vr::run(vrouter).await
         });
     }
 
