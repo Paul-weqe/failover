@@ -67,7 +67,6 @@ pub(crate) enum TimerType {
 pub(crate) enum Event {
     #[default]
     Startup,
-
     Null, 
     Shutdown,
     MasterDown
