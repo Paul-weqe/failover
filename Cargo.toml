@@ -17,14 +17,16 @@ vrrp_packet = { path = "./vrrp_packet", version = "0.1.0" }
 byteorder = "1.5.0"
 ipnet = { version = "2.9.0", features = ["serde"]}
 log = "0.4.21"
-pnet = "0.34.0"
+pnet = "0.33.0"
 rand = "0.8.5"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
-simple_logger = "4.3.3"
+# simple_logger = "4.3.3"
 libc = "0.2.153"
 tokio = { version = "1.37.0", features = ["full"]}
 clap = { version = "4.5.4", features = ["derive"] }
+socket2 = "0.5.7"
+bytes = "1.7.1"
 
 [lib]
 doctest = false

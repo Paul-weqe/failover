@@ -1,22 +1,22 @@
-
-use std::sync::{Arc, Mutex};
 use error::{NetError, OptError};
 use general::get_interface;
 use observer::EventObserver;
 use pkt::generators::{self, MutablePktGenerator};
 use router::VirtualRouter;
 use state_machine::Event;
+use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
 
-
-pub mod general;
-pub mod config;
-pub mod router;
-mod observer;
-mod core_tasks;
-mod state_machine;
-mod pkt;
 mod checksum;
+pub mod config;
+mod core_tasks;
+pub mod general;
+mod network;
+mod observer;
+mod packet;
+mod pkt;
+pub mod router;
+mod state_machine;
 
 pub(crate) type NetResult<T> = Result<T, NetError>;
 pub(crate) type OptResult<T> = Result<T, OptError>;
@@ -24,13 +24,13 @@ pub(crate) type OptResult<T> = Result<T, OptError>;
 #[derive(Clone)]
 pub(crate) struct TaskItems {
     vrouter: Arc<Mutex<VirtualRouter>>,
-    generator: MutablePktGenerator
+    generator: MutablePktGenerator,
 }
 
-pub mod error{
+pub mod error {
     use std::{error::Error, fmt::Display};
 
-    // Network errors 
+    // Network errors
     #[derive(Debug)]
     pub struct NetError(pub String);
     impl Error for NetError {}
@@ -40,7 +40,7 @@ pub mod error{
         }
     }
 
-    // OptError 
+    // OptError
     // used for getting errors when parsing CLI arguments
     #[derive(Debug)]
     pub struct OptError(pub String);
@@ -50,26 +50,22 @@ pub mod error{
             write!(f, "{}", self.0)
         }
     }
-
-
 }
 
-
-/// initiates the VRRP functions across the board. 
+/// initiates the VRRP functions across the board.
 /// from interfaces, channels, packet handling etc...
-pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
-
+pub async fn run(vrouter: VirtualRouter) -> NetResult<()> {
     let interface = get_interface(&vrouter.network_interface)?;
 
     let items = TaskItems {
         vrouter: Arc::new(Mutex::new(vrouter)),
-        generator: generators::MutablePktGenerator::new(interface.clone())
+        generator: generators::MutablePktGenerator::new(interface.clone()),
     };
 
-    match EventObserver::notify(items.vrouter.clone(), Event::Startup){
-        Ok(_) => {},
+    match EventObserver::notify(items.vrouter.clone(), Event::Startup) {
+        Ok(_) => {}
         Err(err) => {
-            log::error!("{err}");
+            //log::error!("{err}");
             panic!("Problem running initial notify statement");
         }
     };
@@ -77,19 +73,14 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()>{
 
     // sync process listens for any incoming network requests
     let network_items = items.clone();
-    tasks_set.spawn(async {
-        core_tasks::network_process(network_items).await
-    });
+    tasks_set.spawn(async { core_tasks::network_process(network_items).await });
 
     let timer_items = items.clone();
-    tasks_set.spawn(async {
-        core_tasks::timer_process(timer_items).await
-    });
-    
+    tasks_set.spawn(async { core_tasks::timer_process(timer_items).await });
+
     while tasks_set.join_next().await.is_some() {
         // join tasks
     }
-    
+
     Ok(())
-    
 }

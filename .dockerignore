@@ -1,0 +1,7 @@
+images/
+target/
+build.sh
+run.sh
+*.snap
+sample-vrrp-config.json
+snapcraft.yaml
