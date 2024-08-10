@@ -1,14 +1,11 @@
 use crate::network;
 use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
 use crate::{
-    checksum, error::NetError, general::virtual_address_action, observer::EventObserver,
-    pkt::generators, state_machine::Event, NetResult,
+    error::NetError, general::virtual_address_action, observer::EventObserver,
+    state_machine::Event, NetResult,
 };
-use crate::{
-    general::{create_datalink_channel, get_interface},
-    router::VirtualRouter,
-    state_machine::States,
-};
+use crate::{general::get_interface, router::VirtualRouter, state_machine::States};
+
 /// Defines how each different type of packet should be handled.
 /// Depending on the current state of the machine.
 /// The two main packets being anticipated are:
@@ -112,12 +109,11 @@ pub(crate) fn handle_incoming_vrrp_pkt(
 ) -> NetResult<()> {
     let mut vrouter = match vrouter_mutex.lock() {
         Ok(vr) => vr,
-        Err(err) => {
+        Err(_err) => {
             //log::warn!("problem fetching vrouter mutex. \n{err}");
             return Ok(());
         }
     };
-    let interface = get_interface(&vrouter.network_interface)?;
     let ip_packet = match Ipv4Packet::new(eth_packet.payload()) {
         Some(pkt) => pkt,
         None => {
@@ -219,12 +215,12 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         for (counter, ip_ad) in vrrp_packet.ip_addresses.iter().enumerate() {
             //addr.push(ip_ad.octets());
             ip_ad.octets().iter().for_each(|oc| {
-                addr.push(oc.clone());
+                addr.push(*oc);
             });
             if (counter + 1) % 4 == 0 {
                 let ip = match Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), 24) {
                     Ok(ip) => ip.addr(),
-                    Err(err) => {
+                    Err(_err) => {
                         //log::error!("Invalid IP on incoming VRRP packet: {:?}", octet);
                         //log::error!("{err}");
                         return Ok(());
@@ -301,27 +297,25 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             // If an ADVERTISEMENT is received, then
             if vrrp_packet.priority == 0 {
                 // send ADVERTISEMENT
-                let mut_pkt_generator = generators::MutablePktGenerator::new(interface.clone());
-                let (mut sender, _) = create_datalink_channel(&interface)?;
+                let mut ips: Vec<Ipv4Addr> = vec![];
+                for addr in vrouter.ip_addresses.clone() {
+                    ips.push(addr.addr());
+                }
 
-                let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                let mut outgoing_vrrp_packet =
-                    mut_pkt_generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
-                outgoing_vrrp_packet.set_checksum(checksum::one_complement_sum(
-                    outgoing_vrrp_packet.packet(),
-                    Some(6),
-                ));
-
-                let ip_len = vrrp_packet.encode().len() + 20;
-                let mut ip_buff: Vec<u8> = vec![0; ip_len];
-                let mut ip_packet = mut_pkt_generator.gen_vrrp_ip_header(&mut ip_buff);
-                ip_packet.set_payload(&vrrp_packet.encode());
-
-                let mut eth_buff: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
-                let mut eth_packet = mut_pkt_generator.gen_vrrp_eth_packet(&mut eth_buff);
-                eth_packet.set_payload(ip_packet.packet());
-
-                sender.send_to(eth_packet.packet(), None);
+                let pkt = VrrpPacket {
+                    version: 2,
+                    hdr_type: 1,
+                    vrid: vrouter.vrid,
+                    priority: vrouter.priority,
+                    count_ip: vrouter.ip_addresses.len() as u8,
+                    auth_type: 0,
+                    adver_int: vrouter.advert_interval,
+                    checksum: 0,
+                    ip_addresses: ips,
+                    auth_data: 0,
+                    auth_data2: 0,
+                };
+                let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
 

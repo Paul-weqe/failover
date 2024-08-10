@@ -1,19 +1,17 @@
-
-
 //! checksums related functions module
 //! This module is dedicated to internet checksums functions.
 //!
-//! credit for rfc1071, propagate_carries and one_complement_sum 
+//! credit for rfc1071, propagate_carries and one_complement_sum
 //! calculation to ref. impl. <https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs>
-//! and rust's rVVRP github 
+//! and rust's rVVRP github
 use byteorder::{ByteOrder, NetworkEndian};
 const _RFC1071_CHUNK_SIZE: usize = 32;
 
 // rfc1071() function
 /// compute rfc1071 internet checksum
 /// returns all-ones if carried checksum is valid
-pub(crate) fn confirm_checksum(mut data: &[u8]) -> u16 
-{
+#[allow(dead_code)]
+pub(crate) fn confirm_checksum(mut data: &[u8]) -> u16 {
     let mut acc = 0;
 
     // for each 32 bytes chunk
@@ -42,17 +40,16 @@ pub(crate) fn confirm_checksum(mut data: &[u8]) -> u16
     propagate_carries(acc)
 }
 
+#[allow(dead_code)]
 // propagate final complement?
-fn propagate_carries(word: u32) -> u16 
-{
+fn propagate_carries(word: u32) -> u16 {
     let sum = (word >> 16) + (word & 0xffff);
     ((sum >> 16) as u16) + (sum as u16)
 }
 
 // one_complement_sum() function
 /// returns all-zeros if checksum is valid
-pub(crate) fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 
-{
+pub(crate) fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 {
     let mut sum = 0u32;
     let mut idx = 0;
 

@@ -1,4 +1,3 @@
-use pnet::packet::Packet;
 use std::{
     net::Ipv4Addr,
     sync::{Arc, Mutex, MutexGuard},
@@ -7,10 +6,9 @@ use std::{
 use crate::{
     checksum,
     error::NetError,
-    general::{create_datalink_channel, get_interface, virtual_address_action},
+    general::{get_interface, virtual_address_action},
     network,
-    packet::VrrpPacket,
-    pkt::generators::MutablePktGenerator,
+    packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket},
     router::VirtualRouter,
     state_machine::{Event, States},
     NetResult,
@@ -38,8 +36,6 @@ impl EventObserver {
         event: Event,
     ) -> NetResult<()> {
         let interface = get_interface(&vrouter.network_interface)?;
-        let generator = MutablePktGenerator::new(interface.clone());
-        let (mut sender, _receiver) = create_datalink_channel(&interface)?;
 
         match event {
             Event::Startup => {
@@ -51,7 +47,7 @@ impl EventObserver {
                             addresses.push(ip.addr());
                         });
 
-                        let pkt = VrrpPacket {
+                        let mut pkt = VrrpPacket {
                             version: 2,
                             hdr_type: 1,
                             vrid: vrouter.vrid,
@@ -64,18 +60,28 @@ impl EventObserver {
                             auth_data: 0,
                             auth_data2: 0,
                         };
+                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
                         let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
 
                         for ip in &vrouter.ip_addresses {
-                            let mut e_buff = [0u8; 42];
-                            let mut a_buff = [0u8; 28];
-                            let (mut grat_eth, grat_arp) = generator.gen_gratuitous_arp_packet(
-                                &mut e_buff,
-                                &mut a_buff,
-                                ip.addr(),
-                            );
-                            grat_eth.set_payload(grat_arp.packet());
-                            sender.send_to(grat_eth.packet(), None);
+                            let eth_frame = EthernetFrame {
+                                dst_mac: [0xff; 6],
+                                src_mac: interface.mac.unwrap().octets(),
+                                ethertype: 0x0806,
+                            };
+                            let arp_pkt = ArpPacket {
+                                hw_type: 1,
+                                proto_type: 0x0800,
+                                hw_length: 6,
+                                proto_length: 4,
+                                operation: 1,
+                                sender_hw_address: interface.mac.unwrap().octets(),
+                                sender_proto_address: ip.addr().octets(),
+                                target_hw_address: [0xff; 6],
+                                target_proto_address: ip.addr().octets(),
+                            };
+                            let arp_frame = ARPframe::new(eth_frame, arp_pkt);
+                            network::send_packet_arp(&interface.name, arp_frame);
                         }
 
                         // bring virtual IP back up.
@@ -137,7 +143,7 @@ impl EventObserver {
                             addresses.push(ip.addr());
                         });
 
-                        let pkt = VrrpPacket {
+                        let mut pkt = VrrpPacket {
                             version: 2,
                             hdr_type: 1,
                             vrid: vrouter.vrid,
@@ -150,6 +156,8 @@ impl EventObserver {
                             auth_data: 0,
                             auth_data2: 0,
                         };
+
+                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
                         let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
                         vrouter.fsm.state = States::Init;
                     }
@@ -162,39 +170,48 @@ impl EventObserver {
 
                     // VRRP advertisement
                     {
-                        // VRRP pakcet
-                        let mut vrrp_buff: Vec<u8> = vec![0; 16 + (4 * vrouter.ip_addresses.len())];
-                        let mut vrrp_packet = generator.gen_vrrp_header(&mut vrrp_buff, &vrouter);
-                        vrrp_packet.set_checksum(checksum::one_complement_sum(
-                            vrrp_packet.packet(),
-                            Some(6),
-                        ));
-
-                        // IP packet
-                        let ip_len = vrrp_packet.packet().len() + 20;
-                        let mut ip_buff: Vec<u8> = vec![0; ip_len];
-                        let mut ip_packet = generator.gen_vrrp_ip_header(&mut ip_buff);
-                        ip_packet.set_payload(vrrp_packet.packet());
-
-                        // Ethernet packet
-                        let mut eth_buffer: Vec<u8> = vec![0; 14 + ip_packet.packet().len()];
-                        let mut ether_packet = generator.gen_vrrp_eth_packet(&mut eth_buffer);
-                        ether_packet.set_payload(ip_packet.packet());
-                        sender.send_to(ether_packet.packet(), None);
+                        let mut ips: Vec<Ipv4Addr> = vec![];
+                        for addr in vrouter.ip_addresses.clone() {
+                            ips.push(addr.addr());
+                        }
+                        let mut pkt = VrrpPacket {
+                            version: 2,
+                            hdr_type: 1,
+                            vrid: vrouter.vrid,
+                            priority: vrouter.priority,
+                            count_ip: vrouter.ip_addresses.len() as u8,
+                            checksum: 0,
+                            auth_type: 0,
+                            adver_int: vrouter.advert_interval,
+                            auth_data: 0,
+                            auth_data2: 0,
+                            ip_addresses: ips,
+                        };
+                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
+                        let _ = network::send_vrrp_packet(vrouter.network_interface.as_str(), pkt);
                     }
 
                     // gratuitous ARP
                     {
                         for ip in &vrouter.ip_addresses {
-                            let mut e_buff = [0u8; 42];
-                            let mut a_buff = [0u8; 28];
-                            let (mut grat_eth, grat_arp) = generator.gen_gratuitous_arp_packet(
-                                &mut e_buff,
-                                &mut a_buff,
-                                ip.addr(),
-                            );
-                            grat_eth.set_payload(grat_arp.packet());
-                            sender.send_to(grat_eth.packet(), None);
+                            let eth_frame = EthernetFrame {
+                                dst_mac: [0xff; 6],
+                                src_mac: interface.mac.unwrap().octets(),
+                                ethertype: 0x0806,
+                            };
+                            let arp_pkt = ArpPacket {
+                                hw_type: 1,
+                                proto_type: 0x0800,
+                                hw_length: 6,
+                                proto_length: 4,
+                                operation: 1,
+                                sender_hw_address: interface.mac.unwrap().octets(),
+                                sender_proto_address: ip.addr().octets(),
+                                target_hw_address: [0xff; 6],
+                                target_proto_address: ip.addr().octets(),
+                            };
+                            let arp_frame = ARPframe::new(eth_frame, arp_pkt);
+                            network::send_packet_arp(&interface.name, arp_frame);
                         }
                     }
 

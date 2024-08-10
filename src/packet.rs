@@ -99,7 +99,7 @@ impl VrrpPacket {
         let auth_data = buf.get_u32();
         let auth_data2 = buf.get_u32();
 
-        return Some(Self {
+        Some(Self {
             version,
             hdr_type,
             vrid,
@@ -111,7 +111,7 @@ impl VrrpPacket {
             ip_addresses,
             auth_data,
             auth_data2,
-        });
+        })
     }
 }
 

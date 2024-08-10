@@ -1,4 +1,3 @@
-
 /// This is the main file for the processes being run.
 /// There are three functions holding these processes
 /// functions that are to be run:
@@ -26,7 +25,6 @@ use pnet::packet::{
 };
 use std::net::Ipv4Addr;
 use std::{
-    io,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -81,7 +79,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
             EtherTypes::Arp => {
                 match handle_incoming_arp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)) {
                     Ok(_) => {}
-                    Err(err) => {
+                    Err(_err) => {
                         //log::error!("problem handing incoming ARP packet");
                         //log::error!("{err}");
                     }
@@ -93,7 +91,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
                 let lock = &vrouter.lock();
                 let net_vr = match lock {
                     Ok(net_vr) => net_vr,
-                    Err(err) => {
+                    Err(_err) => {
                         //log::warn!("Cannot Get router mutex");
                         //log::warn!("{err}");
                         continue;

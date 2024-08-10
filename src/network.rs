@@ -21,8 +21,6 @@ pub fn send_vrrp_packet(ifname: &str, mut packet: VrrpPacket) -> std::io::Result
 }
 
 pub fn send_packet_arp(ifname: &str, mut arp_frame: ARPframe) {
-    // eth_frame: EthernetFrame, arp_packet: ArpPacket) {
-
     use libc::{c_void, sendto, sockaddr, sockaddr_ll};
     use std::ffi::CString;
     use std::os::fd::AsRawFd;

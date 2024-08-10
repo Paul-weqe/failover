@@ -324,7 +324,7 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
 
     for file_config in list_file_configs {
         // check if the name of Virtual Router being entered is unique
-        if let Some(con) = result
+        if let Some(_con) = result
             .iter()
             .find(|r: &&FileConfig| r.name == file_config.name)
         {
@@ -333,7 +333,7 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
         };
 
         // check if VRID of the Virtual Router being entered is unique
-        if let Some(con) = result
+        if let Some(_con) = result
             .iter()
             .find(|r: &&FileConfig| r.vrid == file_config.vrid)
         {

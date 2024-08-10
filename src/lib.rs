@@ -64,7 +64,7 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()> {
 
     match EventObserver::notify(items.vrouter.clone(), Event::Startup) {
         Ok(_) => {}
-        Err(err) => {
+        Err(_err) => {
             //log::error!("{err}");
             panic!("Problem running initial notify statement");
         }

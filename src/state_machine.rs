@@ -58,6 +58,7 @@ pub(crate) enum TimerType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[allow(dead_code)]
 pub(crate) enum Event {
     #[default]
     Startup,
