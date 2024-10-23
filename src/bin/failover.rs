@@ -7,7 +7,6 @@ use tokio::task::JoinSet;
 
 #[tokio::main]
 async fn main() {
-    simple_logger::init_with_env().unwrap();
     let args = CliArgs::parse();
     let routers_config = match parse_cli_opts(args) {
         Ok(config) => {

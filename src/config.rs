@@ -1,11 +1,17 @@
 use crate::{error::OptError, general::random_vr_name, OptResult};
 use clap::{Parser, Subcommand};
 use ipnet::Ipv4Net;
+use log::LevelFilter;
+use log4rs::{
+    append::{console::ConsoleAppender, file::FileAppender},
+    config::{Appender, Root},
+    Config,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
     ffi::OsStr,
-    fs::{self, File},
+    fs::{create_dir_all, File},
     io::{BufReader, Write},
     path::Path,
 };
@@ -158,18 +164,28 @@ impl VrrpConfig {
 #[command(name = "Version")]
 #[command(about = "Runs the VRRP protocol", long_about = None)]
 pub struct CliArgs {
-    #[command(subcommand)]
-    mode: Mode,
+    #[command(
+        subcommand,
+        help = "file-mode for if you want the configs loaded from a file. cli-mode if you want your configs taken directly from the CLI."
+    )]
+    cfg: Cfg,
 
     #[arg(long, default_value = "run")]
     action: String,
 }
 
 #[derive(Subcommand, Debug)]
-enum Mode {
+enum Cfg {
     FileMode {
-        #[arg(long)]
+        #[arg(long, help = "path to the we will get our configs from")]
         filename: Option<String>,
+
+        #[arg(
+            long,
+            default_value = None,
+            help = "Path log file you want to use"
+        )]
+        log_file_path: Option<String>,
     },
     CliMode {
         #[arg(long, help = "The name of the Virtual Router Instance. e.g `VR_1`")]
@@ -204,9 +220,16 @@ enum Mode {
         #[arg(
             long,
             action,
-            help = "(highly adviced to be called). When true, the higher priority will always preempt the lower priority."
+            help = "(highly advised to be true). When true, the higher priority will always preempt the lower priority."
         )]
         preempt_mode: bool,
+
+        #[arg(
+            long,
+            default_value = None,
+            help = "Path log file you want to use"
+        )]
+        log_file_path: Option<String>,
     },
 }
 
@@ -217,26 +240,42 @@ pub enum Action {
 }
 
 pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
-    match args.mode {
-        Mode::FileMode { filename } => {
+    match args.cfg {
+        Cfg::FileMode {
+            filename,
+            log_file_path,
+        } => {
+            // configure logging as required
+            configure_logging(log_file_path);
+
             // generate file path if none is given
             let fpath = match filename {
                 None => {
                     // get default file path and create new directory if it does not exist
                     match env::var("SNAP_COMMON") {
                         Ok(path) => path + "/vrrp-config.json",
-                        Err(_) => {
-                            let _ = fs::create_dir_all("/etc/failover/");
-                            "/etc/failover/vrrp-config.json".to_string()
-                        }
+                        Err(_) => "/etc/failover/vrrp-config.json".to_string(),
                     }
                 }
                 Some(f) => f,
             };
 
+            log::info!("using config file {:#?}", fpath);
             // create the config file (if it does not exist)
             if !Path::new(&fpath).exists() {
-                let mut file = File::create(&fpath).unwrap();
+                let mut file = match File::create(&fpath) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        let dir_path = match std::path::Path::new(&fpath).parent() {
+                            Some(dir) => dir,
+                            None => {
+                                return Err(OptError(String::from("unable to find config path")))
+                            }
+                        };
+                        let _ = create_dir_all(dir_path);
+                        File::create(&fpath).unwrap()
+                    }
+                };
                 let _ = file.write_all(DEFAULT_JSON_CONFIG);
             }
 
@@ -261,7 +300,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             Ok(configs)
         }
 
-        Mode::CliMode {
+        Cfg::CliMode {
             mut name,
             vrid,
             ip_address,
@@ -269,7 +308,9 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             priority,
             advert_interval,
             preempt_mode,
+            log_file_path,
         } => {
+            configure_logging(log_file_path);
             if name.is_none() {
                 name = Some(random_vr_name());
             };
@@ -294,6 +335,33 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             Ok(vec![VrrpConfig::Cli(config)])
         }
     }
+}
+
+fn configure_logging(log_file_path: Option<String>) {
+    let log_console_stderr = ConsoleAppender::builder().build();
+    let mut log_builder = Config::builder()
+        .appender(Appender::builder().build("stderr", Box::new(log_console_stderr)));
+    let mut root_builder = Root::builder();
+
+    // set file path logging
+    if let Some(file_path) = log_file_path {
+        // Logging to log file.
+        let log_file = FileAppender::builder()
+            // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
+            //.encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
+            .build(file_path)
+            .unwrap();
+        log_builder =
+            log_builder.appender(Appender::builder().build("logfile", Box::new(log_file)));
+        root_builder = root_builder.appender("logfile");
+    }
+    root_builder = root_builder.appender("stderr"); // .appender("stdout");
+                                                    //.build(LevelFilter::Trace);
+
+    let log_config = log_builder
+        .build(root_builder.build(LevelFilter::Trace))
+        .unwrap();
+    let _handler = log4rs::init_config(log_config);
 }
 
 fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
