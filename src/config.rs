@@ -249,7 +249,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
                             "teardown" => Action::Teardown,
                             "run" => Action::Run,
                             _ => {
-                                //log::warn!("{} is not a valid action, therefore resulted to default 'run' action", args.action);
+                                log::warn!("{} is not a valid action, therefore resulted to default 'run' action", args.action);
                                 Action::Run
                             }
                         };

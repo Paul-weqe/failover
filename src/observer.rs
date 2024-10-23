@@ -93,7 +93,7 @@ impl EventObserver {
                         let advert_time = vrouter.advert_interval as f32;
                         vrouter.fsm.set_advert_timer(advert_time);
                         vrouter.fsm.state = States::Master;
-                        //log::info!("({}) transitioned to MASTER (init)", vrouter.name);
+                        log::info!("({}) transitioned to MASTER (init)", vrouter.name);
                     } else {
                         // delete virtual IP.
                         virtual_address_action(
@@ -104,7 +104,7 @@ impl EventObserver {
                         let m_down_interval = vrouter.master_down_interval;
                         vrouter.fsm.set_master_down_timer(m_down_interval);
                         vrouter.fsm.state = States::Backup;
-                        //log::info!("({}) transitioned to BACKUP (init)", vrouter.name);
+                        log::info!("({}) transitioned to BACKUP (init)", vrouter.name);
                     }
                 }
             }
@@ -224,7 +224,7 @@ impl EventObserver {
                     let advert_interval = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_interval);
                     vrouter.fsm.state = States::Master;
-                    //log::info!("({}) Transitioned to MASTER", vrouter.name);
+                    log::info!("({}) Transitioned to MASTER", vrouter.name);
                 }
             }
             _ => {}

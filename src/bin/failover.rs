@@ -7,12 +7,16 @@ use tokio::task::JoinSet;
 
 #[tokio::main]
 async fn main() {
+    simple_logger::init_with_env().unwrap();
     let args = CliArgs::parse();
     let routers_config = match parse_cli_opts(args) {
-        Ok(config) => config,
+        Ok(config) => {
+            log::debug!("Configs read successfully");
+            config
+        }
         Err(err) => {
-            //log::error!("Error reading config params");
-            panic!("{err}")
+            log::error!("Error reading configs {err}");
+            std::process::exit(1);
         }
     };
 

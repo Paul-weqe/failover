@@ -22,9 +22,14 @@ pub(crate) fn create_datalink_channel(
 ) -> NetResult<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
     match pnet::datalink::channel(interface, Default::default()) {
         Ok(Channel::Ethernet(tx, rx)) => Ok((tx, rx)),
-        Ok(_) => Err(NetError("Unknown channel type".to_string())),
-        Err(_err) => {
-            //log::error!("{err}");
+        Ok(_) => {
+            let err = "Unknown channel type";
+            log::error!("{err}");
+            Err(NetError(err.to_string()))
+        }
+        Err(err) => {
+            log::error!("Problem creating datalink channel");
+            log::error!("{err}");
             Err(NetError("Problem creating datalink channel".to_string()))
         }
     }
@@ -35,7 +40,7 @@ pub(crate) fn create_datalink_channel(
 pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
     let mut ips: Vec<Ipv4Net> = vec![];
     if conf.ip_addresses().len() > 20 {
-        //log::warn!("({})  More than 20 IP addresses(max for VRRP) have been configured. Only first 20 addresses will be used..", conf.name());
+        log::warn!("({})  More than 20 IP addresses(max for VRRP) have been configured. Only first 20 addresses will be used..", conf.name());
     }
 
     let addresses = if conf.ip_addresses().len() <= 20 {
@@ -52,19 +57,7 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
         }
     }
 
-    //let vr = VirtualRouter::new(
-    //    conf.name(),
-    //    conf.vrid(),
-    //    ips,
-    //    conf.priority(),
-    //    conf.advert_interval(),
-    //    conf.preempt_mode(),
-    //    conf.interface_name(),
-    //);
-    //log::info!("({}) Entered {:?} state.", vr.name, vr.fsm.state);
-    //vr
-
-    VirtualRouter::new(
+    let vr = VirtualRouter::new(
         conf.name(),
         conf.vrid(),
         ips,
@@ -72,7 +65,9 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
         conf.advert_interval(),
         conf.preempt_mode(),
         conf.interface_name(),
-    )
+    );
+    log::info!("({}) Entered {:?} state.", vr.name, vr.fsm.state);
+    vr
 }
 
 pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str) {
@@ -89,6 +84,6 @@ pub(crate) fn random_vr_name() -> String {
         .map(char::from)
         .collect();
 
-    //log::info!("Name for Virtual Router not given. generated name VR_{val}");
+    log::info!("Name for Virtual Router not given. generated name VR_{val}");
     format!("VR_{val}")
 }

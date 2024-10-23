@@ -34,19 +34,22 @@ pub(crate) fn handle_incoming_arp_pkt(
     let vrouter = match vrouter.lock() {
         Ok(vr) => vr,
         Err(err) => {
-            //log::warn!("Unable to create mutex lock for vrouter");
+            log::error!("Unable to create mutex lock for vrouter");
             return Err(NetError(format!(
                 "Unable to create mutex lock for vrouter\n\n {err}"
             )));
         }
     };
     let interface = get_interface(&vrouter.network_interface)?;
-    let arp_packet = ArpPacket::decode(eth_packet.payload()).unwrap();
+    let arp_packet = match ArpPacket::decode(eth_packet.payload()) {
+        Some(arp_packet) => arp_packet,
+        None => return Ok(()),
+    };
 
     let interface_mac = match interface.clone().mac {
         Some(mac) => mac,
         None => {
-            //log::warn!("interface {} does not have mac address. Unable to continue with incoming VRRP packet checks", &interface.name);
+            log::warn!("interface {} does not have mac address. Unable to continue with incoming VRRP packet checks", &interface.name);
             return Ok(());
         }
     };
@@ -109,15 +112,16 @@ pub(crate) fn handle_incoming_vrrp_pkt(
 ) -> NetResult<()> {
     let mut vrouter = match vrouter_mutex.lock() {
         Ok(vr) => vr,
-        Err(_err) => {
-            //log::warn!("problem fetching vrouter mutex. \n{err}");
+        Err(err) => {
+            log::warn!("problem fetching vrouter mutex");
+            log::warn!("{err}");
             return Ok(());
         }
     };
     let ip_packet = match Ipv4Packet::new(eth_packet.payload()) {
         Some(pkt) => pkt,
         None => {
-            //log::warn!("Unable to read incoming IP packet");
+            log::warn!("Unable to read incoming IP packet");
             return Ok(());
         }
     };
@@ -125,7 +129,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     let vrrp_packet = match VrrpPacket::decode(ip_packet.payload()) {
         Some(pkt) => pkt,
         None => {
-            //log::warn!("Unable to read incoming VRRP packet");
+            log::warn!("Unable to read incoming VRRP packet");
             return Ok(());
         }
     };
@@ -150,14 +154,14 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         // 1. Verify IP TTL is 255
         if ip_packet.get_ttl() != 255 {
             error = format!("({}) TTL of incoming VRRP packet != 255", vrouter.name);
-            //log::error!("{error}");
+            log::warn!("{error}");
             return Result::Err(NetError(error));
         }
 
         // 2. MUST verify the VRRP version is 2.
         if vrrp_packet.version != 2 {
             error = format!("({}) Incoming VRRP packet Version != 2", vrouter.name);
-            //log::error!("{error}");
+            log::error!("{error}");
             return Result::Err(NetError(error));
         }
 
@@ -189,7 +193,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 "({}) Incoming VRRP packet has advert interval {} while configured advert interval is {}",
                 vrouter.name, vrrp_packet.adver_int, vrouter.advert_interval);
 
-            //log::error!("{error}");
+            log::error!("{error}");
             return Result::Err(NetError(error));
         }
     }
@@ -207,7 +211,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
 
         if vrrp_packet.ip_addresses.clone().len() % 4 != 0 {
             error = format!("({}) Invalid Ip Addresses in vrrp packet", vrouter.name);
-            //log::error!("{error}");
+            log::error!("{error}");
             return Result::Err(NetError(error));
         }
 
@@ -220,14 +224,18 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             if (counter + 1) % 4 == 0 {
                 let ip = match Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), 24) {
                     Ok(ip) => ip.addr(),
-                    Err(_err) => {
-                        //log::error!("Invalid IP on incoming VRRP packet: {:?}", octet);
-                        //log::error!("{err}");
+                    Err(err) => {
+                        log::error!("Invalid IP on incoming VRRP packet: {:?}", addr);
+                        log::error!("{err}");
                         return Ok(());
                     }
                 };
                 if !vrouter.ipv4_addresses().contains(&ip) {
-                    //log::error!("({}) IP address {:?} for incoming VRRP packet not found in local config", vrouter.name, ip);
+                    log::error!(
+                        "({}) IP address {:?} for incoming VRRP packet not found in local config",
+                        vrouter.name,
+                        ip
+                    );
                     addr_check = false;
                 }
             }
@@ -239,7 +247,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 "({}) ip count check({}) does not match with local configuration of ip count {}",
                 vrouter.name, vrrp_packet.count_ip, vrouter.ip_addresses.len()
             );
-            //log::error!("{error}");
+            log::error!("{error}");
             if vrrp_packet.priority != 255 {
                 return Result::Err(NetError(error));
             }
@@ -250,7 +258,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 "({}) IP addresses for incoming vrrp don't match ",
                 vrouter.name
             );
-            //log::error!("{error}");
+            log::error!("{error}");
             if vrrp_packet.priority != 255 {
                 return Result::Err(NetError(error));
             }
@@ -274,7 +282,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 vrouter.fsm.state = States::Master;
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
-                //log::info!("({}) transitioned to MASTER", vrouter.name);
+                log::info!("({}) transitioned to MASTER", vrouter.name);
             }
             Ok(())
         }
@@ -283,10 +291,9 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             let incoming_ip_pkt = match Ipv4Packet::new(eth_packet.payload()) {
                 Some(pkt) => pkt,
                 None => {
-                    //log::warn!("Problem processing incoming IP packet");
-                    return Err(NetError(
-                        "Problem processing incoming IP packet".to_string(),
-                    ));
+                    let err = "Problem processing incoming IP packet";
+                    log::warn!("{err}");
+                    return Err(NetError(err.to_string()));
                 }
             };
             let adv_priority_gt_local_priority = vrrp_packet.priority > vrouter.priority;
@@ -330,7 +337,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
                 vrouter.fsm.state = States::Backup;
-                //log::info!("({}) transitioned to BACKUP", vrouter.name);
+                log::info!("({}) transitioned to BACKUP", vrouter.name);
                 EventObserver::notify_mut(vrouter, Event::Null)?;
                 Ok(())
             } else if adv_priority_eq_local_priority {
@@ -344,7 +351,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 vrouter.fsm.set_master_down_timer(m_down_interval);
                 vrouter.fsm.state = States::Backup;
                 vrouter.fsm.event = Event::Null;
-                //log::info!("({}) transitioned to BACKUP", vrouter.name);
+                log::info!("({}) transitioned to BACKUP", vrouter.name);
                 EventObserver::notify_mut(vrouter, Event::Null)?;
                 Ok(())
             } else {

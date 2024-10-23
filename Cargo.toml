@@ -18,12 +18,12 @@ pnet = "0.33.0"
 rand = "0.8.5"
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
-# simple_logger = "4.3.3"
 libc = "0.2.153"
 tokio = { version = "1.37.0", features = ["full"]}
 clap = { version = "4.5.4", features = ["derive"] }
 socket2 = "0.5.7"
 bytes = "1.7.1"
+simple_logger = "5.0.0"
 
 [lib]
 doctest = false

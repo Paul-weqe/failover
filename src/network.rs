@@ -34,7 +34,8 @@ pub fn send_packet_arp(ifname: &str, mut arp_frame: ARPframe) {
     let c_ifname = match CString::new(ifname) {
         Ok(c_ifname) => c_ifname,
         Err(err) => {
-            println!("error...{err}");
+            log::error!("unable to cast {ifname} into CString");
+            log::error!("{err}");
             return;
         }
     };
@@ -62,12 +63,9 @@ pub fn send_packet_arp(ifname: &str, mut arp_frame: ARPframe) {
             std::mem::size_of_val(&sa) as u32,
         ) {
             -1 => {
-                println!("there is an error!!!");
+                log::warn!("Problem sending ARP message");
             }
-            fd => {
-                println!("fd...{:#?}", fd);
-                println!("sent successfully");
-            }
+            _fd => {}
         }
     }
 }

@@ -44,8 +44,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
         let buff = match receiver.next() {
             Ok(buf) => buf,
             Err(_) => {
-                //log::warn!("Error Receiving Packet");
-                //log::warn!("{}", io::Error::last_os_error());
+                log::warn!("Error Receiving Packet");
                 continue;
             }
         };
@@ -54,7 +53,6 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
             Some(incoming_eth_pkt) => incoming_eth_pkt,
             None => continue,
         };
-        // println!("{:?}", incoming_eth_pkt);
 
         match incoming_eth_pkt.get_ethertype() {
             EtherTypes::Ipv4 => {
@@ -62,8 +60,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
                     Some(pkt) => pkt,
                     // when there is no IPv4 packet received or the IP packet is unable to be read
                     None => {
-                        //log::warn!("Unable to read IP packet");
-                        //log::warn!("{:?}", io::Error::last_os_error());
+                        log::warn!("Unable to read IP packet");
                         continue;
                     }
                 };
@@ -79,9 +76,9 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
             EtherTypes::Arp => {
                 match handle_incoming_arp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)) {
                     Ok(_) => {}
-                    Err(_err) => {
-                        //log::error!("problem handing incoming ARP packet");
-                        //log::error!("{err}");
+                    Err(err) => {
+                        log::error!("problem handing incoming ARP packet");
+                        log::error!("{err}");
                     }
                 }
             }
@@ -91,9 +88,9 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
                 let lock = &vrouter.lock();
                 let net_vr = match lock {
                     Ok(net_vr) => net_vr,
-                    Err(_err) => {
-                        //log::warn!("Cannot Get router mutex");
-                        //log::warn!("{err}");
+                    Err(err) => {
+                        log::warn!("Cannot Get router mutex");
+                        log::warn!("{err}");
                         continue;
                     }
                 };
@@ -117,8 +114,7 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
         let mut vrouter = match vrouter.lock() {
             Ok(vrouter) => vrouter,
             Err(_) => {
-                //log::error!("Unable to get mutex for vrouter");
-                //log::error!("{:?}", io::Error::last_os_error());
+                log::error!("Unable to get mutex for vrouter");
                 continue;
             }
         };
@@ -138,7 +134,7 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                         }
                     }
                     None => {
-                        //log::warn!("No timer being waited for.");
+                        log::warn!("No timer being waited for.");
                         continue;
                     }
                 };
@@ -173,7 +169,7 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                         }
                     }
                     None => {
-                        //log::warn!("No timer being waited for.");
+                        log::warn!("No timer being waited for.");
                         continue;
                     }
                 };
