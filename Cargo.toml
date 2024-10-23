@@ -1,12 +1,12 @@
 [package]
 name = "failover_vr"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 authors = [ "Paul-weqe <paul1tw1@gmail.com>" ]
 description = "VRRP implementation library (and binary installation) in Rust."
 license = "MIT"
 repository = "https://github.com/Paul-weqe/failover"
-keywords = [ "vrrp", "network", "RFC" ]
+keywords = [ "vrrp", "network", "RFC", "redundancy" ]
 documentation = "https://failover-docs.readthedocs.io/en/latest/install.html#running-as-library-in-rust"
 
 
