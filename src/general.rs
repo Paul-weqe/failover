@@ -70,7 +70,7 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
     vr
 }
 
-pub(crate) fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str) {
+pub fn virtual_address_action(action: &str, addresses: &[String], interface_name: &str) {
     for addr in addresses {
         let cmd_args = vec!["address", action, &addr, "dev", interface_name];
         let _ = Command::new("ip").args(cmd_args).output();

@@ -1,5 +1,5 @@
 use crate::{error::OptError, general::random_vr_name, OptResult};
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use ipnet::Ipv4Net;
 use log::LevelFilter;
 use log4rs::{
@@ -163,19 +163,28 @@ impl VrrpConfig {
 #[derive(Parser, Debug)]
 #[command(name = "Version")]
 #[command(about = "Runs the VRRP protocol", long_about = None)]
-pub struct CliArgs {
+pub struct CliArgs2 {
     #[command(
         subcommand,
-        help = "file-mode for if you want the configs loaded from a file. cli-mode if you want your configs taken directly from the CLI."
+        help = "`run` for starting the VRRP instances and `teardown` for stopping them"
     )]
     cfg: Cfg,
-
-    #[arg(long, default_value = "run")]
-    action: String,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Parser, Debug)]
 enum Cfg {
+    Run {
+        #[command(subcommand)]
+        mode: Mode,
+    },
+    Teardown {
+        #[command(subcommand)]
+        mode: Mode,
+    },
+}
+
+#[derive(Parser, Debug)]
+enum Mode {
     FileMode {
         #[arg(long, help = "path to the we will get our configs from")]
         filename: Option<String>,
@@ -239,15 +248,20 @@ pub enum Action {
     Teardown,
 }
 
-pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
+pub fn parse_cli_opts(args: CliArgs2) -> OptResult<Vec<VrrpConfig>> {
     match args.cfg {
-        Cfg::FileMode {
+        Cfg::Run { mode } => load_mode(mode, Action::Run),
+        Cfg::Teardown { mode } => load_mode(mode, Action::Teardown),
+    }
+}
+
+fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
+    match mode {
+        Mode::FileMode {
             filename,
             log_file_path,
         } => {
-            // configure logging as required
             configure_logging(log_file_path);
-
             // generate file path if none is given
             let fpath = match filename {
                 None => {
@@ -280,27 +294,18 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             }
 
             let mut configs: Vec<VrrpConfig> = vec![];
-
             match read_json_config(&fpath) {
                 Ok(vec_config) => {
-                    for mut c in vec_config {
-                        c.action = match args.action.to_lowercase().trim() {
-                            "teardown" => Action::Teardown,
-                            "run" => Action::Run,
-                            _ => {
-                                log::warn!("{} is not a valid action, therefore resulted to default 'run' action", args.action);
-                                Action::Run
-                            }
-                        };
-                        configs.push(VrrpConfig::File(c));
+                    for mut config_item in vec_config {
+                        config_item.action = action.clone();
+                        configs.push(VrrpConfig::File(config_item));
                     }
                 }
                 Err(_) => return Result::Err(OptError(format!("Problem parsing file {}", &fpath))),
             }
             Ok(configs)
         }
-
-        Cfg::CliMode {
+        Mode::CliMode {
             mut name,
             vrid,
             ip_address,
@@ -313,7 +318,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
             configure_logging(log_file_path);
             if name.is_none() {
                 name = Some(random_vr_name());
-            };
+            }
 
             let config = CliConfig {
                 name,
@@ -323,14 +328,7 @@ pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
                 priority,
                 advert_interval,
                 preempt_mode,
-                action: match args.action.to_lowercase().trim() {
-                    "teardown" => Action::Teardown,
-                    "run" => Action::Run,
-                    _ => {
-                        //log::warn!("{} is not a valid action, therefore resulted to default 'run' action", args.action);
-                        Action::Run
-                    }
-                },
+                action,
             };
             Ok(vec![VrrpConfig::Cli(config)])
         }
