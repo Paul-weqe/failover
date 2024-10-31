@@ -12,7 +12,9 @@ pub fn send_vrrp_packet(ifname: &str, mut packet: VrrpPacket) -> std::io::Result
     let _ = sock.bind_device(Some(ifname.as_bytes()));
     let _ = sock.set_broadcast(true);
     let _ = sock.set_ttl(255);
-    packet.checksum = checksum::one_complement_sum(&packet.encode(), Some(6));
+
+    // confirm checksum. checksum position is the third item in 16 bit words
+    packet.checksum = checksum::calculate(&packet.encode(), 3);
 
     let buf: &[u8] = &packet.encode();
     let saddr = SocketAddrV4::new(Ipv4Addr::new(224, 0, 0, 18), 0);

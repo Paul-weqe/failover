@@ -47,30 +47,33 @@ fn propagate_carries(word: u32) -> u16 {
     ((sum >> 16) as u16) + (sum as u16)
 }
 
-// one_complement_sum() function
-/// returns all-zeros if checksum is valid
-pub(crate) fn one_complement_sum(data: &[u8], pos: Option<usize>) -> u16 {
-    let mut sum = 0u32;
-    let mut idx = 0;
+pub fn calculate(data: &[u8], checksum_position: usize) -> u16 {
+    let mut result: u16 = 0;
 
-    while idx < data.len() {
-        if let Some(p) = pos {
-            if idx == p {
-                idx = p + 2; // skip 2 bytes
-            }
-            // if we reach the end of slice, we are done
-            if idx == data.len() {
-                break;
-            }
-        };
-        let word = (data[idx] as u32) << 8 | data[idx + 1] as u32;
-        sum += word;
-        idx += 2;
+    // since data is in u8's, we need pairs of the data to get u16
+    for (i, pair) in data.chunks(2).enumerate() {
+        // the fifth pair is the checksum field, which is ignored
+        if i == checksum_position {
+            continue;
+        }
+
+        result = ones_complement(result, ((pair[0] as u16) << 8) | pair[1] as u16);
     }
 
-    while sum >> 16 != 0 {
-        sum = (sum >> 16) + (sum & 0xFFFF);
-    }
+    // do a one's complement to get the sum
+    !result
+}
 
-    !sum as u16
+fn ones_complement(mut first: u16, mut second: u16) -> u16 {
+    let mut carry: u32 = 10;
+    let mut result: u16 = 0;
+
+    while carry != 0 {
+        let tmp_res = first as u32 + second as u32;
+        result = (tmp_res & 0xFFFF) as u16;
+        carry = tmp_res >> 16;
+        first = result;
+        second = carry as u16;
+    }
+    result
 }

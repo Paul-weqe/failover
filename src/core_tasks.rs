@@ -162,7 +162,9 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                                 auth_data: 0,
                                 auth_data2: 0,
                             };
-                            pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
+                            // confirm checksum. checksum position is the third item in 16 bit words
+                            pkt.checksum = checksum::calculate(&pkt.encode(), 3);
+
                             let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
                             let advert_time = vrouter.advert_interval as f32;
                             vrouter.fsm.set_advert_timer(advert_time);

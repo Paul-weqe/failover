@@ -60,7 +60,10 @@ impl EventObserver {
                             auth_data: 0,
                             auth_data2: 0,
                         };
-                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
+
+                        // confirm checksum. checksum position is the third item in 16 bit words
+                        pkt.checksum = checksum::calculate(&pkt.encode(), 3);
+
                         let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
 
                         for ip in &vrouter.ip_addresses {
@@ -156,8 +159,9 @@ impl EventObserver {
                             auth_data: 0,
                             auth_data2: 0,
                         };
+                        // confirm checksum. checksum position is the third item in 16 bit words
+                        pkt.checksum = checksum::calculate(&pkt.encode(), 3);
 
-                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
                         let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
                         vrouter.fsm.state = States::Init;
                     }
@@ -187,7 +191,9 @@ impl EventObserver {
                             auth_data2: 0,
                             ip_addresses: ips,
                         };
-                        pkt.checksum = checksum::one_complement_sum(&pkt.encode(), Some(6));
+                        // confirm checksum. checksum position is the third item in 16 bit words
+                        pkt.checksum = checksum::calculate(&pkt.encode(), 3);
+
                         let _ = network::send_vrrp_packet(vrouter.network_interface.as_str(), pkt);
                     }
 
