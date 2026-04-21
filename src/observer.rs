@@ -48,17 +48,12 @@ impl EventObserver {
                     });
 
                     let mut pkt = VrrpPacket {
-                        version: 2,
-                        hdr_type: 1,
                         vrid: vrouter.vrid,
                         priority: vrouter.priority,
                         count_ip: vrouter.ip_addresses.len() as u8,
-                        auth_type: 0,
                         adver_int: vrouter.advert_interval,
                         checksum: 0,
                         ip_addresses: addresses,
-                        auth_data: 0,
-                        auth_data2: 0,
                     };
 
                     // Confirm checksum. checksum position is the third item
@@ -135,17 +130,12 @@ impl EventObserver {
                         });
 
                         let mut pkt = VrrpPacket {
-                            version: 2,
-                            hdr_type: 1,
                             vrid: vrouter.vrid,
                             priority: vrouter.priority,
                             count_ip: vrouter.ip_addresses.len() as u8,
-                            auth_type: 0,
                             adver_int: vrouter.advert_interval,
                             checksum: 0,
                             ip_addresses: addresses,
-                            auth_data: 0,
-                            auth_data2: 0,
                         };
                         // Confirm checksum. checksum position is the third
                         // item in 16 bit words.
@@ -170,16 +160,11 @@ impl EventObserver {
                         ips.push(addr.addr());
                     }
                     let mut pkt = VrrpPacket {
-                        version: 2,
-                        hdr_type: 1,
                         vrid: vrouter.vrid,
                         priority: vrouter.priority,
                         count_ip: vrouter.ip_addresses.len() as u8,
                         checksum: 0,
-                        auth_type: 0,
                         adver_int: vrouter.advert_interval,
-                        auth_data: 0,
-                        auth_data2: 0,
                         ip_addresses: ips,
                     };
                     // Confirm checksum. checksum position is the third item

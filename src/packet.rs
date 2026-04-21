@@ -27,19 +27,12 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 //
 #[derive(Clone, Debug)]
 pub struct VrrpPacket {
-    pub version: u8,
-    pub hdr_type: u8,
     pub vrid: u8,
     pub priority: u8,
     pub count_ip: u8,
-    pub auth_type: u8,
     pub adver_int: u8,
     pub checksum: u16,
     pub ip_addresses: Vec<Ipv4Addr>,
-
-    // the following two are only used for backward compatibility.
-    pub auth_data: u32,
-    pub auth_data2: u32,
 }
 
 impl VrrpPacket {
@@ -47,27 +40,39 @@ impl VrrpPacket {
     const MAX_PKT_LENGTH: usize = 80;
     const MAX_IP_COUNT: usize = 16;
 
+    // Header elements that remain as const.
+    const VRRP_VERSION: u8 = 2;
+    const HDWR_TYPE: u8 = 1;
+
     // Encodes VRRP packet into a bytes buffer.
     pub fn encode(&self) -> BytesMut {
         let mut buf = BytesMut::with_capacity(114);
-        let ver_type = (self.version << 4) | self.hdr_type;
+
+        // Vrrp_version | hardware type.
+        let ver_type = (Self::VRRP_VERSION << 4) | Self::HDWR_TYPE;
         buf.put_u8(ver_type);
         buf.put_u8(self.vrid);
         buf.put_u8(self.priority);
         buf.put_u8(self.count_ip);
-        buf.put_u8(self.auth_type);
+
+        // Auth type.
+        buf.put_u8(0);
         buf.put_u8(self.adver_int);
-        buf.put_u16(self.checksum);
+
+        // Checksum.
+        buf.put_u16(0);
         for addr in self.ip_addresses.clone() {
             let octets = addr.octets();
             octets.iter().for_each(|octet| buf.put_u8(*octet));
         }
 
-        buf.put_u32(self.auth_data);
-        buf.put_u32(self.auth_data2);
+        // Auth data1 & Auth Data2, only for backward compatibility.
+        buf.put_u32(0);
+        buf.put_u32(0);
         buf
     }
 
+    // TODO: Change this to a Result<Self> return.
     pub fn decode(data: &[u8]) -> Option<Self> {
         // 1. pkt length verification
         let pkt_size = data.len();
@@ -75,11 +80,16 @@ impl VrrpPacket {
         let mut buf: Bytes = Bytes::copy_from_slice(data);
         let ver_type = buf.get_u8();
         let version = ver_type >> 4;
-        let hdr_type = ver_type & 0x0F;
+        let _hdr_type = ver_type & 0x0F;
+
+        if version != Self::VRRP_VERSION {
+            return None;
+        }
+
         let vrid = buf.get_u8();
         let priority = buf.get_u8();
         let count_ip = buf.get_u8();
-        let auth_type = buf.get_u8();
+        let _auth_type = buf.get_u8();
         let adver_int = buf.get_u8();
 
         if !(Self::MIN_PKT_LENGTH..=Self::MAX_PKT_LENGTH).contains(&pkt_size)
@@ -96,21 +106,16 @@ impl VrrpPacket {
             ip_addresses.push(Ipv4Addr::from_bits(buf.get_u32()));
         }
 
-        let auth_data = buf.get_u32();
-        let auth_data2 = buf.get_u32();
+        let _auth_data = buf.get_u32();
+        let _auth_data2 = buf.get_u32();
 
         Some(Self {
-            version,
-            hdr_type,
             vrid,
             priority,
             count_ip,
-            auth_type,
             adver_int,
             checksum,
             ip_addresses,
-            auth_data,
-            auth_data2,
         })
     }
 }

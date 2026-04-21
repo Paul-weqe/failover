@@ -156,17 +156,12 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                                 addresses.push(ip.addr());
                             });
                             let mut pkt = VrrpPacket {
-                                version: 2,
-                                hdr_type: 1,
                                 vrid: vrouter.vrid,
                                 priority: vrouter.priority,
                                 count_ip: vrouter.ip_addresses.len() as u8,
-                                auth_type: 0,
                                 adver_int: vrouter.advert_interval,
                                 checksum: 0,
                                 ip_addresses: addresses,
-                                auth_data: 0,
-                                auth_data2: 0,
                             };
                             // Confirm checksum. checksum position is the third
                             // item in 16 bit words.

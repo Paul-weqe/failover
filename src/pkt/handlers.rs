@@ -167,14 +167,6 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             return Result::Err(NetError(error));
         }
 
-        // 2. MUST verify the VRRP version is 2.
-        if vrrp_packet.version != 2 {
-            error =
-                format!("({}) Incoming VRRP packet Version != 2", vrouter.name);
-            log::error!("{error}");
-            return Result::Err(NetError(error));
-        }
-
         // 3. MUST verify that the received packet contains the complete VRRP
         //      packet (including fixed fields, IP Address(es), and Authentication
         //      Data)
@@ -336,17 +328,12 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 }
 
                 let pkt = VrrpPacket {
-                    version: 2,
-                    hdr_type: 1,
                     vrid: vrouter.vrid,
                     priority: vrouter.priority,
                     count_ip: vrouter.ip_addresses.len() as u8,
-                    auth_type: 0,
                     adver_int: vrouter.advert_interval,
                     checksum: 0,
                     ip_addresses: ips,
-                    auth_data: 0,
-                    auth_data2: 0,
                 };
                 let _ =
                     network::send_vrrp_packet(&vrouter.network_interface, pkt);
