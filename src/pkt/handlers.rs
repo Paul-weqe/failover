@@ -1,11 +1,3 @@
-use crate::network;
-use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
-use crate::{
-    error::NetError, general::virtual_address_action, observer::EventObserver,
-    state_machine::Event, NetResult,
-};
-use crate::{general::get_interface, router::VirtualRouter, state_machine::States};
-
 /// Defines how each different type of packet should be handled.
 /// Depending on the current state of the machine.
 /// The two main packets being anticipated are:
@@ -14,17 +6,23 @@ use crate::{general::get_interface, router::VirtualRouter, state_machine::States
 ///
 /// The actions on each of the above are specified in section
 /// 6 of RFC 3768.
-///
 use core::f32;
+use std::net::Ipv4Addr;
+use std::sync::{Arc, Mutex};
+
 use ipnet::Ipv4Net;
-use pnet::{
-    datalink,
-    packet::{ethernet::EthernetPacket, ipv4::Ipv4Packet, Packet},
-};
-use std::{
-    net::Ipv4Addr,
-    sync::{Arc, Mutex},
-};
+use pnet::datalink;
+use pnet::packet::Packet;
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ipv4::Ipv4Packet;
+
+use crate::error::NetError;
+use crate::general::{get_interface, virtual_address_action};
+use crate::observer::EventObserver;
+use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
+use crate::router::VirtualRouter;
+use crate::state_machine::{Event, State};
+use crate::{NetResult, network};
 //use vrrp_packet::VrrpPacket;
 
 pub(crate) fn handle_incoming_arp_pkt(
@@ -49,14 +47,17 @@ pub(crate) fn handle_incoming_arp_pkt(
     let interface_mac = match interface.clone().mac {
         Some(mac) => mac,
         None => {
-            log::warn!("interface {} does not have mac address. Unable to continue with incoming VRRP packet checks", &interface.name);
+            log::warn!(
+                "interface {} does not have mac address. Unable to continue with incoming VRRP packet checks",
+                &interface.name
+            );
             return Ok(());
         }
     };
 
     match vrouter.fsm.state {
-        States::Init => {}
-        States::Backup => {
+        State::Init => {}
+        State::Backup => {
             // MUST NOT respond to ARP requests for the IP address(s) associated
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
@@ -73,7 +74,7 @@ pub(crate) fn handle_incoming_arp_pkt(
             }
         }
 
-        States::Master => {
+        State::Master => {
             // MUST respond to ARP requests for the IP address(es) associated
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
@@ -97,7 +98,10 @@ pub(crate) fn handle_incoming_arp_pkt(
                     };
 
                     let arp_frame = ARPframe::new(eth_frame, arp_packet);
-                    network::send_packet_arp(interface.name.as_str(), arp_frame);
+                    network::send_packet_arp(
+                        interface.name.as_str(),
+                        arp_frame,
+                    );
                 }
             }
         }
@@ -137,8 +141,10 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     let mut error;
 
     // TODO {
-    //      - currently we are looking at the first IP address of the interface that is sending the data.
-    //      - this should be changed to looking through all the IP addresses in the device.
+    //      - currently we are looking at the first IP address of the interface
+    //          that is sending the data.
+    //      - this should be changed to looking through all the IP addresses in
+    //          the device.
     // }
     // received packets from the same device
     for interface in datalink::interfaces().iter() {
@@ -149,18 +155,22 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         };
     }
 
-    // MUST DO verifications(rfc3768 section 7.1)
+    // MUST DO verifications(rfc3768 section 7.1).
     {
-        // 1. Verify IP TTL is 255
+        // 1. Verify IP TTL is 255.
         if ip_packet.get_ttl() != 255 {
-            error = format!("({}) TTL of incoming VRRP packet != 255", vrouter.name);
+            error = format!(
+                "({}) TTL of incoming VRRP packet != 255",
+                vrouter.name
+            );
             log::warn!("{error}");
             return Result::Err(NetError(error));
         }
 
         // 2. MUST verify the VRRP version is 2.
         if vrrp_packet.version != 2 {
-            error = format!("({}) Incoming VRRP packet Version != 2", vrouter.name);
+            error =
+                format!("({}) Incoming VRRP packet Version != 2", vrouter.name);
             log::error!("{error}");
             return Result::Err(NetError(error));
         }
@@ -191,7 +201,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         if vrrp_packet.adver_int != vrouter.advert_interval {
             error = format!(
                 "({}) Incoming VRRP packet has advert interval {} while configured advert interval is {}",
-                vrouter.name, vrrp_packet.adver_int, vrouter.advert_interval);
+                vrouter.name, vrrp_packet.adver_int, vrouter.advert_interval
+            );
 
             log::error!("{error}");
             return Result::Err(NetError(error));
@@ -206,11 +217,15 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         //      If the packet was not generated by the address owner (Priority does
         //      not equal 255 (decimal)), the receiver MUST drop the packet,
         //      otherwise continue processing.
-        let count_check = vrrp_packet.count_ip == vrouter.ip_addresses.len() as u8;
+        let count_check =
+            vrrp_packet.count_ip == vrouter.ip_addresses.len() as u8;
         let mut addr_check = true;
 
         if vrrp_packet.ip_addresses.clone().len() % 4 != 0 {
-            error = format!("({}) Invalid Ip Addresses in vrrp packet", vrouter.name);
+            error = format!(
+                "({}) Invalid Ip Addresses in vrrp packet",
+                vrouter.name
+            );
             log::error!("{error}");
             return Result::Err(NetError(error));
         }
@@ -222,10 +237,16 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 addr.push(*oc);
             });
             if (counter + 1) % 4 == 0 {
-                let ip = match Ipv4Net::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), 24) {
+                let ip = match Ipv4Net::new(
+                    Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]),
+                    24,
+                ) {
                     Ok(ip) => ip.addr(),
                     Err(err) => {
-                        log::error!("Invalid IP on incoming VRRP packet: {:?}", addr);
+                        log::error!(
+                            "Invalid IP on incoming VRRP packet: {:?}",
+                            addr
+                        );
                         log::error!("{err}");
                         return Ok(());
                     }
@@ -242,10 +263,11 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
 
         if !count_check {
-            error =
-                format!(
+            error = format!(
                 "({}) ip count check({}) does not match with local configuration of ip count {}",
-                vrouter.name, vrrp_packet.count_ip, vrouter.ip_addresses.len()
+                vrouter.name,
+                vrrp_packet.count_ip,
+                vrouter.ip_addresses.len()
             );
             log::error!("{error}");
             if vrrp_packet.priority != 255 {
@@ -266,11 +288,13 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     }
 
     match vrouter.fsm.state {
-        States::Backup => {
+        State::Backup => {
             if vrrp_packet.priority == 0 {
                 let skew_time = vrouter.skew_time;
                 vrouter.fsm.set_master_down_timer(skew_time);
-            } else if !vrouter.preempt_mode || vrrp_packet.priority >= vrouter.priority {
+            } else if !vrouter.preempt_mode
+                || vrrp_packet.priority >= vrouter.priority
+            {
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
             } else if vrouter.priority > vrrp_packet.priority {
@@ -279,7 +303,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                     &vrouter.str_ipv4_addresses(),
                     &vrouter.network_interface,
                 );
-                vrouter.fsm.state = States::Master;
+                vrouter.fsm.state = State::Master;
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
                 log::info!("({}) transitioned to MASTER", vrouter.name);
@@ -287,7 +311,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             Ok(())
         }
 
-        States::Master => {
+        State::Master => {
             let incoming_ip_pkt = match Ipv4Packet::new(eth_packet.payload()) {
                 Some(pkt) => pkt,
                 None => {
@@ -296,10 +320,12 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                     return Err(NetError(err.to_string()));
                 }
             };
-            let adv_priority_gt_local_priority = vrrp_packet.priority > vrouter.priority;
-            let adv_priority_eq_local_priority = vrrp_packet.priority == vrouter.priority;
-            let _send_ip_gt_local_ip =
-                incoming_ip_pkt.get_source() > incoming_ip_pkt.get_destination();
+            let adv_priority_gt_local_priority =
+                vrrp_packet.priority > vrouter.priority;
+            let adv_priority_eq_local_priority =
+                vrrp_packet.priority == vrouter.priority;
+            let _send_ip_gt_local_ip = incoming_ip_pkt.get_source()
+                > incoming_ip_pkt.get_destination();
 
             // If an ADVERTISEMENT is received, then
             if vrrp_packet.priority == 0 {
@@ -322,7 +348,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                     auth_data: 0,
                     auth_data2: 0,
                 };
-                let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
+                let _ =
+                    network::send_vrrp_packet(&vrouter.network_interface, pkt);
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
 
@@ -336,7 +363,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
-                vrouter.fsm.state = States::Backup;
+                vrouter.fsm.state = State::Backup;
                 log::info!("({}) transitioned to BACKUP", vrouter.name);
                 EventObserver::notify_mut(vrouter, Event::Null)?;
                 Ok(())
@@ -349,7 +376,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
-                vrouter.fsm.state = States::Backup;
+                vrouter.fsm.state = State::Backup;
                 vrouter.fsm.event = Event::Null;
                 log::info!("({}) transitioned to BACKUP", vrouter.name);
                 EventObserver::notify_mut(vrouter, Event::Null)?;

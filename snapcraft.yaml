@@ -4,7 +4,7 @@ summary: A rust implementation of VRRP
 description: |
   Failover is a rust implementation of the VRRP protocol. 
 
-  VRRP is a redundancy protocol that achieves this by 'creating' a virtual device with virtual network parameters. 
+  VRRP is a redundancy protocol that achieves this by creating a virtual device with virtual network parameters.
 
   The protocol has been tested together with `keepalived` and will soon be tested with routers and switches from major vendors.
   

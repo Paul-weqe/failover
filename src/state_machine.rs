@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Default)]
 pub struct VirtualRouterMachine {
     pub(crate) timer: Timer,
-    pub(crate) state: States,
+    pub(crate) state: State,
     pub(crate) event: Event,
 }
 
@@ -12,7 +12,9 @@ impl VirtualRouterMachine {
         self.timer = Timer {
             t_type: TimerType::Adver,
             remaining_time: duration,
-            waiting_for: Some(Instant::now() + Duration::from_secs_f32(duration)),
+            waiting_for: Some(
+                Instant::now() + Duration::from_secs_f32(duration),
+            ),
         };
     }
 
@@ -20,7 +22,9 @@ impl VirtualRouterMachine {
         self.timer = Timer {
             t_type: TimerType::MasterDown,
             remaining_time: duration,
-            waiting_for: Some(Instant::now() + Duration::from_secs_f32(duration)),
+            waiting_for: Some(
+                Instant::now() + Duration::from_secs_f32(duration),
+            ),
         };
     }
 
@@ -34,7 +38,7 @@ impl VirtualRouterMachine {
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub(crate) enum States {
+pub(crate) enum State {
     #[default]
     Init,
     Backup,

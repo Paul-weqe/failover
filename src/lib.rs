@@ -1,10 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 use error::{NetError, OptError};
 use general::get_interface;
 use observer::EventObserver;
 use pkt::generators::{self, MutablePktGenerator};
 use router::VirtualRouter;
 use state_machine::Event;
-use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
 
 mod checksum;
@@ -28,7 +29,8 @@ pub(crate) struct TaskItems {
 }
 
 pub mod error {
-    use std::{error::Error, fmt::Display};
+    use std::error::Error;
+    use std::fmt::Display;
 
     // Network errors
     #[derive(Debug)]
@@ -40,8 +42,7 @@ pub mod error {
         }
     }
 
-    // OptError
-    // used for getting errors when parsing CLI arguments
+    // Used for getting errors when parsing CLI arguments.
     #[derive(Debug)]
     pub struct OptError(pub String);
     impl Error for OptError {}
@@ -71,7 +72,7 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()> {
     };
     let mut tasks_set = JoinSet::new();
 
-    // sync process listens for any incoming network requests
+    // Sync process listens for any incoming network requests.
     let network_items = items.clone();
     tasks_set.spawn(async { core_tasks::network_process(network_items).await });
 

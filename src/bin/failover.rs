@@ -1,8 +1,6 @@
 use clap::Parser;
-use failover_vr::{
-    config::{parse_cli_opts, Action, CliArgs2},
-    general::{config_to_vr, virtual_address_action},
-};
+use failover_vr::config::{Action, CliArgs2, parse_cli_opts};
+use failover_vr::general::{config_to_vr, virtual_address_action};
 use tokio::task::JoinSet;
 
 #[tokio::main]
@@ -28,7 +26,11 @@ async fn main() {
             }
             Action::Teardown => {
                 log::info!("tearing down {:#?}", config.name());
-                virtual_address_action("delete", &config.ip_addresses(), &config.interface_name());
+                virtual_address_action(
+                    "delete",
+                    &config.ip_addresses(),
+                    &config.interface_name(),
+                );
                 log::info!("{:#?} tear down complete", config.name());
             }
         }

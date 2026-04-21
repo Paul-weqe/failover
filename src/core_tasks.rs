@@ -1,3 +1,15 @@
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use pnet::packet::Packet;
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use tokio::time;
+
+use crate::general::create_datalink_channel;
+use crate::observer::EventObserver;
 /// This is the main file for the processes being run.
 /// There are three functions holding these processes
 /// functions that are to be run:
@@ -6,29 +18,10 @@
 ///
 /// Each of the above will be run on a thread of their own.
 /// Avoided using async since they were only three separate threads needed.
-///
-///
 use crate::packet::VrrpPacket;
-use crate::{checksum, network};
-use crate::{
-    general::create_datalink_channel,
-    observer::EventObserver,
-    pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt},
-    state_machine::{Event, States},
-    NetResult,
-};
-use pnet::packet::{
-    ethernet::{EtherTypes, EthernetPacket},
-    ip::IpNextHeaderProtocols,
-    ipv4::Ipv4Packet,
-    Packet,
-};
-use std::net::Ipv4Addr;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use tokio::time;
+use crate::pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt};
+use crate::state_machine::{Event, State};
+use crate::{NetResult, checksum, network};
 
 /// Waits for network connections and does the necessary actions.
 /// Acts on the queries mostly described from the state machine
@@ -56,17 +49,24 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
 
         match incoming_eth_pkt.get_ethertype() {
             EtherTypes::Ipv4 => {
-                let incoming_ip_pkt = match Ipv4Packet::new(incoming_eth_pkt.payload()) {
-                    Some(pkt) => pkt,
-                    // when there is no IPv4 packet received or the IP packet is unable to be read
-                    None => {
-                        log::warn!("Unable to read IP packet");
-                        continue;
-                    }
-                };
+                let incoming_ip_pkt =
+                    match Ipv4Packet::new(incoming_eth_pkt.payload()) {
+                        Some(pkt) => pkt,
+                        // When there is no IPv4 packet received or the IP
+                        // packet is unable to be read.
+                        None => {
+                            log::warn!("Unable to read IP packet");
+                            continue;
+                        }
+                    };
 
-                if incoming_ip_pkt.get_next_level_protocol() == IpNextHeaderProtocols::Vrrp {
-                    match handle_incoming_vrrp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)) {
+                if incoming_ip_pkt.get_next_level_protocol()
+                    == IpNextHeaderProtocols::Vrrp
+                {
+                    match handle_incoming_vrrp_pkt(
+                        &incoming_eth_pkt,
+                        Arc::clone(&vrouter),
+                    ) {
                         Ok(_) => {}
                         Err(_) => continue,
                     }
@@ -74,7 +74,10 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
             }
 
             EtherTypes::Arp => {
-                match handle_incoming_arp_pkt(&incoming_eth_pkt, Arc::clone(&vrouter)) {
+                match handle_incoming_arp_pkt(
+                    &incoming_eth_pkt,
+                    Arc::clone(&vrouter),
+                ) {
                     Ok(_) => {}
                     Err(err) => {
                         log::error!("problem handing incoming ARP packet");
@@ -97,7 +100,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
 
                 // if we are master, we forward the packet.
                 // otherwise we leave the packet be
-                if net_vr.fsm.state == States::Master {}
+                if net_vr.fsm.state == State::Master {}
             }
         }
     }
@@ -127,7 +130,10 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                     // to notify for the master down
                     Some(waiting) => {
                         if Instant::now() > waiting {
-                            match EventObserver::notify_mut(vrouter, Event::MasterDown) {
+                            match EventObserver::notify_mut(
+                                vrouter,
+                                Event::MasterDown,
+                            ) {
                                 Ok(info) => info,
                                 Err(err) => return Err(err),
                             }
@@ -162,10 +168,15 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                                 auth_data: 0,
                                 auth_data2: 0,
                             };
-                            // confirm checksum. checksum position is the third item in 16 bit words
-                            pkt.checksum = checksum::calculate(&pkt.encode(), 3);
+                            // Confirm checksum. checksum position is the third
+                            // item in 16 bit words.
+                            pkt.checksum =
+                                checksum::calculate(&pkt.encode(), 3);
 
-                            let _ = network::send_vrrp_packet(&vrouter.network_interface, pkt);
+                            let _ = network::send_vrrp_packet(
+                                &vrouter.network_interface,
+                                pkt,
+                            );
                             let advert_time = vrouter.advert_interval as f32;
                             vrouter.fsm.set_advert_timer(advert_time);
                         }

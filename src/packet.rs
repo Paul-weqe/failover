@@ -123,15 +123,15 @@ pub struct ARPframe {
     pub ethertype: u16,   // ether type
 
     // ARP
-    pub hardware_type: u16,         // network link type (0x1=ethernet)
-    pub protocol_type: u16,         // upper-layer protocol for resolution
-    pub hw_addr_len: u8,            // length of hardware address (bytes)
-    pub proto_addr_len: u8,         // upper-layer protocol address length
-    pub opcode: u16,                // operation (0x1=request, 0x2=reply)
-    pub sender_hw_addr: [u8; 6],    // sender hardware address
-    pub sender_proto_addr: [u8; 4], // internetwork address of sender
-    pub target_hw_addr: [u8; 6],    // hardware address of target
-    pub target_proto_addr: [u8; 4], // internetwork address of target
+    pub hardware_type: u16, // Network link type (0x1=ethernet)
+    pub protocol_type: u16, // Upper-layer protocol for resolution
+    pub hw_addr_len: u8,    // Length of hardware address (bytes)
+    pub proto_addr_len: u8, // Upper-layer protocol address length
+    pub opcode: u16,        // Operation (0x1=request, 0x2=reply)
+    pub sender_hw_addr: [u8; 6], // Sender hardware address
+    pub sender_proto_addr: [u8; 4], // Internetwork address of sender
+    pub target_hw_addr: [u8; 6], // Hardware address of target
+    pub target_proto_addr: [u8; 4], // Internetwork address of target
 }
 
 impl ARPframe {

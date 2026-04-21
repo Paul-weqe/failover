@@ -1,5 +1,6 @@
-use ipnet::Ipv4Net;
 use std::net::Ipv4Addr;
+
+use ipnet::Ipv4Net;
 
 use crate::state_machine::VirtualRouterMachine;
 
@@ -46,7 +47,8 @@ impl VirtualRouter {
         // SKEW TIME = (256 * priority) / 256
         let skew_time: f32 = (256_f32 - priority as f32) / 256_f32;
         // MASTER DOWN INTERVAL = (3 * ADVERTISEMENT INTERVAL ) + SKEW TIME
-        let master_down_interval: f32 = (3_f32 * advert_interval as f32) + skew_time;
+        let master_down_interval: f32 =
+            (3_f32 * advert_interval as f32) + skew_time;
 
         Self {
             name,

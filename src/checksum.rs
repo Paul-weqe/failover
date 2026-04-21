@@ -2,7 +2,8 @@
 //! This module is dedicated to internet checksums functions.
 //!
 //! credit for rfc1071, propagate_carries and one_complement_sum
-//! calculation to ref. impl. <https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs>
+//! calculation to ref. impl.
+//!     <https://github.com/m-labs/smoltcp/blob/master/src/wire/ip.rs>
 //! and rust's rVVRP github
 use byteorder::{ByteOrder, NetworkEndian};
 const _RFC1071_CHUNK_SIZE: usize = 32;
@@ -57,7 +58,8 @@ pub fn calculate(data: &[u8], checksum_position: usize) -> u16 {
             continue;
         }
 
-        result = ones_complement(result, ((pair[0] as u16) << 8) | pair[1] as u16);
+        result =
+            ones_complement(result, ((pair[0] as u16) << 8) | pair[1] as u16);
     }
 
     // do a one's complement to get the sum

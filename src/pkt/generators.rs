@@ -16,7 +16,11 @@ use pnet::datalink::NetworkInterface;
 /// let mut arp_buff = [0u8; 28];
 ///
 /// let gen = MutablePktGenerator(interface: interface);
-/// let arp_pkt = generator.gen_gratuitous_arp_packet(eth_buff, arp_buff, Ipv4Addr::from_str("192.168.100.12"));
+/// let arp_pkt = generator.gen_gratuitous_arp_packet(
+///     eth_buff,
+///     arp_buff,
+///     Ipv4Addr::from_str("192.168.100.12")
+/// );
 /// ```
 #[derive(Clone, Debug)]
 pub(crate) struct MutablePktGenerator {

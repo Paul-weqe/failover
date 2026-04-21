@@ -1,14 +1,18 @@
-use crate::{
-    checksum,
-    packet::{ARPframe, VrrpPacket},
-};
+use std::net::{Ipv4Addr, SocketAddrV4};
+
 use libc::AF_PACKET;
 use socket2::{Domain, Protocol, Socket, Type};
-use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::io::unix::AsyncFd;
 
-pub fn send_vrrp_packet(ifname: &str, mut packet: VrrpPacket) -> std::io::Result<usize> {
-    let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(112))).unwrap();
+use crate::checksum;
+use crate::packet::{ARPframe, VrrpPacket};
+
+pub fn send_vrrp_packet(
+    ifname: &str,
+    mut packet: VrrpPacket,
+) -> std::io::Result<usize> {
+    let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(112)))
+        .unwrap();
     let _ = sock.bind_device(Some(ifname.as_bytes()));
     let _ = sock.set_broadcast(true);
     let _ = sock.set_ttl(255);
@@ -23,11 +27,14 @@ pub fn send_vrrp_packet(ifname: &str, mut packet: VrrpPacket) -> std::io::Result
 }
 
 pub fn send_packet_arp(ifname: &str, mut arp_frame: ARPframe) {
-    use libc::{c_void, sendto, sockaddr, sockaddr_ll};
     use std::ffi::CString;
     use std::os::fd::AsRawFd;
 
-    let sock_init = Socket::new(Domain::PACKET, Type::RAW, Some(Protocol::from(0x0806))).unwrap();
+    use libc::{c_void, sendto, sockaddr, sockaddr_ll};
+
+    let sock_init =
+        Socket::new(Domain::PACKET, Type::RAW, Some(Protocol::from(0x0806)))
+            .unwrap();
 
     let _ = sock_init.bind_device(Some(ifname.as_bytes()));
     let _ = sock_init.set_broadcast(true);
@@ -54,7 +61,8 @@ pub fn send_packet_arp(ifname: &str, mut arp_frame: ARPframe) {
     };
 
     unsafe {
-        let ptr_sockaddr = std::mem::transmute::<*mut sockaddr_ll, *mut sockaddr>(&mut sa);
+        let ptr_sockaddr =
+            std::mem::transmute::<*mut sockaddr_ll, *mut sockaddr>(&mut sa);
 
         match sendto(
             sock.as_raw_fd(),

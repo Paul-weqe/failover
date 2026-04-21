@@ -1,20 +1,21 @@
-use crate::{error::OptError, general::random_vr_name, OptResult};
+use std::env;
+use std::ffi::OsStr;
+use std::fs::{File, create_dir_all};
+use std::io::{BufReader, Write};
+use std::path::Path;
+
 use clap::Parser;
 use ipnet::Ipv4Net;
 use log::LevelFilter;
-use log4rs::{
-    append::{console::ConsoleAppender, file::FileAppender},
-    config::{Appender, Root},
-    Config,
-};
+use log4rs::Config;
+use log4rs::append::console::ConsoleAppender;
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Root};
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    ffi::OsStr,
-    fs::{create_dir_all, File},
-    io::{BufReader, Write},
-    path::Path,
-};
+
+use crate::OptResult;
+use crate::error::OptError;
+use crate::general::random_vr_name;
 
 const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 {
@@ -87,8 +88,6 @@ pub struct BaseConfig {
     pub action: Action,
 }
 
-// pub struct
-
 #[derive(Debug, Clone)]
 pub enum VrrpConfig {
     File(FileConfig),
@@ -96,12 +95,12 @@ pub enum VrrpConfig {
 }
 
 impl VrrpConfig {
-    // for name, if not specified, we will generate a random name (VR-{random-string})
+    // For name, if not specified, we will generate a random name
+    //  (VR-{random-string}).
     pub fn name(&self) -> String {
         let name = match self {
             VrrpConfig::File(config) => Some(config.name.clone()),
             VrrpConfig::Cli(config) => config.name.clone(),
-            // VrrpConfig::Base(config) => config.name.unwrap()
         };
         match name {
             Some(n) => n,
@@ -123,7 +122,8 @@ impl VrrpConfig {
         }
     }
 
-    // if interface name has not been specified, we will create one with format: ( fover-{random-string} )
+    // If interface name has not been specified, we will create one with
+    //  format: ( fover-{random-string} ).
     pub fn interface_name(&self) -> String {
         match self {
             VrrpConfig::File(config) => config.interface_name.clone(),
@@ -197,18 +197,24 @@ enum Mode {
         log_file_path: Option<String>,
     },
     CliMode {
-        #[arg(long, help = "The name of the Virtual Router Instance. e.g `VR_1`")]
+        #[arg(
+            long,
+            help = "The name of the Virtual Router Instance. e.g `VR_1`"
+        )]
         name: Option<String>,
 
-        #[arg(long, help = "Virtual Router ID of the Virtual router instance. ")]
+        #[arg(
+            long,
+            help = "Virtual Router ID of the Virtual router instance. "
+        )]
         vrid: u8,
 
-        #[arg(long, num_args=1.., help="The IP Address(es) of that will the Virtual router will be assigned. Can be more than one. ")]
+        #[arg(long, num_args=1.., help="The IP Address(es) of that will the Virtual router will be assigned.")]
         ip_address: Vec<String>,
 
         #[arg(
             long,
-            help = "name of the network interface where the Virtual Router instance will be attached. "
+            help = "name of the network interface where the Virtual Router instance will be attached."
         )]
         interface_name: String,
 
@@ -262,10 +268,11 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
             log_file_path,
         } => {
             configure_logging(log_file_path);
-            // generate file path if none is given
+            // Generate file path if none is given.
             let fpath = match filename {
                 None => {
-                    // get default file path and create new directory if it does not exist
+                    // Get default file path and create new directory if it
+                    //  does not exist.
                     match env::var("SNAP_COMMON") {
                         Ok(path) => path + "/vrrp-config.json",
                         Err(_) => "/etc/failover/vrrp-config.json".to_string(),
@@ -275,17 +282,20 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
             };
 
             log::info!("using config file {:#?}", fpath);
-            // create the config file (if it does not exist)
+            // Create the config file (if it does not exist).
             if !Path::new(&fpath).exists() {
                 let mut file = match File::create(&fpath) {
                     Ok(f) => f,
                     Err(_) => {
-                        let dir_path = match std::path::Path::new(&fpath).parent() {
-                            Some(dir) => dir,
-                            None => {
-                                return Err(OptError(String::from("unable to find config path")))
-                            }
-                        };
+                        let dir_path =
+                            match std::path::Path::new(&fpath).parent() {
+                                Some(dir) => dir,
+                                None => {
+                                    return Err(OptError(String::from(
+                                        "unable to find config path",
+                                    )));
+                                }
+                            };
                         let _ = create_dir_all(dir_path);
                         File::create(&fpath).unwrap()
                     }
@@ -301,7 +311,12 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
                         configs.push(VrrpConfig::File(config_item));
                     }
                 }
-                Err(_) => return Result::Err(OptError(format!("Problem parsing file {}", &fpath))),
+                Err(_) => {
+                    return Result::Err(OptError(format!(
+                        "Problem parsing file {}",
+                        &fpath
+                    )));
+                }
             }
             Ok(configs)
         }
@@ -337,24 +352,20 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
 
 fn configure_logging(log_file_path: Option<String>) {
     let log_console_stderr = ConsoleAppender::builder().build();
-    let mut log_builder = Config::builder()
-        .appender(Appender::builder().build("stderr", Box::new(log_console_stderr)));
+    let mut log_builder = Config::builder().appender(
+        Appender::builder().build("stderr", Box::new(log_console_stderr)),
+    );
     let mut root_builder = Root::builder();
 
     // set file path logging
     if let Some(file_path) = log_file_path {
         // Logging to log file.
-        let log_file = FileAppender::builder()
-            // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
-            //.encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
-            .build(file_path)
-            .unwrap();
-        log_builder =
-            log_builder.appender(Appender::builder().build("logfile", Box::new(log_file)));
+        let log_file = FileAppender::builder().build(file_path).unwrap();
+        log_builder = log_builder
+            .appender(Appender::builder().build("logfile", Box::new(log_file)));
         root_builder = root_builder.appender("logfile");
     }
-    root_builder = root_builder.appender("stderr"); // .appender("stdout");
-                                                    //.build(LevelFilter::Trace);
+    root_builder = root_builder.appender("stderr");
 
     let log_config = log_builder
         .build(root_builder.build(LevelFilter::Trace))
@@ -365,11 +376,9 @@ fn configure_logging(log_file_path: Option<String>) {
 fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
     let path_str = path.as_ref().as_os_str();
 
-    //log::info!("Reading from config file {:?}", path_str);
     let file = match File::open(path_str) {
         Ok(f) => f,
         Err(_) => {
-            //log::error!("Unable to open file {:?}", path.as_ref().as_os_str());
             return Err(OptError(format!(
                 "unable to open file `{:?}`",
                 path.as_ref().as_os_str()
@@ -380,13 +389,11 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
     let reader = BufReader::new(file);
     let mut result: Vec<FileConfig> = Vec::new();
 
-    let list_file_configs: Vec<FileConfig> = match serde_json::from_reader(reader) {
-        Ok(config) => config,
-        Err(_) => match single_file_config(path_str) {
-            Ok(conf) => conf,
-            Err(err) => return Err(err),
-        },
-    };
+    let list_file_configs: Vec<FileConfig> =
+        match serde_json::from_reader(reader) {
+            Ok(config) => config,
+            Err(_) => single_file_config(path_str)?,
+        };
 
     for file_config in list_file_configs {
         // check if the name of Virtual Router being entered is unique
@@ -394,7 +401,6 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
             .iter()
             .find(|r: &&FileConfig| r.name == file_config.name)
         {
-            //log::warn!("Configs for Virtual Router with name {:?} already exist. Will be ignored", con.name);
             continue;
         };
 
@@ -403,7 +409,6 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
             .iter()
             .find(|r: &&FileConfig| r.vrid == file_config.vrid)
         {
-            //log::warn!("Configs for Virtual Router with VRID {:?} already exist. Will be ignored", con.vrid);
             continue;
         };
 
@@ -423,7 +428,6 @@ fn single_file_config(path: &OsStr) -> OptResult<Vec<FileConfig>> {
     let _: FileConfig = match serde_json::from_reader(reader) {
         Ok(config) => return Ok(vec![config]),
         Err(_) => {
-            //log::error!("Wrong configurations for file {:?}", path);
             return Err(OptError(format!(
                 "Wrong config formatting in file {:?}",
                 path
