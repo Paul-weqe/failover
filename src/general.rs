@@ -1,12 +1,14 @@
-use std::process::Command;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
+use futures_util::stream::TryStreamExt;
 use ipnet::Ipv4Net;
 use pnet::datalink::{
     self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface,
 };
 use rand::Rng;
 use rand::distributions::Alphanumeric;
+use rtnetlink::{AddressMessageBuilder, new_connection};
 
 use crate::NetResult;
 use crate::config::VrrpConfig;
@@ -80,14 +82,97 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
     vr
 }
 
+/// Adds/removes the given virtual IP addresses on `interface_name` via
+/// Netlink (equivalent to `ip address add/delete <addr> dev <iface>`).
+///
+/// Bridges into async rtnetlink code from what is otherwise a synchronous
+/// call chain, so this must be invoked from within a multi-threaded tokio
+/// runtime.
 pub fn virtual_address_action(
     action: &str,
     addresses: &[String],
     interface_name: &str,
 ) {
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(apply_address_action(
+            action,
+            addresses,
+            interface_name,
+        ));
+    });
+}
+
+async fn apply_address_action(
+    action: &str,
+    addresses: &[String],
+    interface_name: &str,
+) {
+    let (connection, handle, _) = match new_connection() {
+        Ok(conn) => conn,
+        Err(err) => {
+            log::error!("Unable to open netlink connection: {err}");
+            return;
+        }
+    };
+    tokio::spawn(connection);
+
+    let mut links = handle
+        .link()
+        .get()
+        .match_name(interface_name.to_string())
+        .execute();
+    let index = match links.try_next().await {
+        Ok(Some(link)) => link.header.index,
+        Ok(None) => {
+            log::error!(
+                "Unable to find interface {interface_name} for virtual address action"
+            );
+            return;
+        }
+        Err(err) => {
+            log::error!(
+                "Problem fetching interface {interface_name}: {err}"
+            );
+            return;
+        }
+    };
+
     for addr in addresses {
-        let cmd_args = vec!["address", action, &addr, "dev", interface_name];
-        let _ = Command::new("ip").args(cmd_args).output();
+        let net = match Ipv4Net::from_str(addr) {
+            Ok(net) => net,
+            Err(err) => {
+                log::error!("Invalid virtual address {addr}: {err}");
+                continue;
+            }
+        };
+
+        let result = match action {
+            "add" => {
+                handle
+                    .address()
+                    .add(index, IpAddr::V4(net.addr()), net.prefix_len())
+                    .replace()
+                    .execute()
+                    .await
+            }
+            "delete" => {
+                let message = AddressMessageBuilder::<Ipv4Addr>::new()
+                    .index(index)
+                    .address(net.addr(), net.prefix_len())
+                    .build();
+                handle.address().del(message).execute().await
+            }
+            _ => {
+                log::warn!("Unknown virtual address action '{action}'");
+                continue;
+            }
+        };
+
+        if let Err(err) = result {
+            log::warn!(
+                "Problem performing netlink '{action}' for {addr} on {interface_name}: {err}"
+            );
+        }
     }
 }
 
