@@ -10,10 +10,10 @@ use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rtnetlink::{AddressMessageBuilder, new_connection};
 
-use crate::NetResult;
 use crate::config::VrrpConfig;
 use crate::error::NetError;
 use crate::router::VirtualRouter;
+use crate::{AddressAction, NetResult};
 
 pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface> {
     let interface_names_match = |iface: &NetworkInterface| iface.name == name;
@@ -89,7 +89,7 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
 /// call chain, so this must be invoked from within a multi-threaded tokio
 /// runtime.
 pub fn virtual_address_action(
-    action: &str,
+    action: AddressAction,
     addresses: &[String],
     interface_name: &str,
 ) {
@@ -103,7 +103,7 @@ pub fn virtual_address_action(
 }
 
 async fn apply_address_action(
-    action: &str,
+    action: AddressAction,
     addresses: &[String],
     interface_name: &str,
 ) {
@@ -130,9 +130,7 @@ async fn apply_address_action(
             return;
         }
         Err(err) => {
-            log::error!(
-                "Problem fetching interface {interface_name}: {err}"
-            );
+            log::error!("Problem fetching interface {interface_name}: {err}");
             return;
         }
     };
@@ -147,7 +145,7 @@ async fn apply_address_action(
         };
 
         let result = match action {
-            "add" => {
+            AddressAction::Add => {
                 handle
                     .address()
                     .add(index, IpAddr::V4(net.addr()), net.prefix_len())
@@ -155,16 +153,12 @@ async fn apply_address_action(
                     .execute()
                     .await
             }
-            "delete" => {
+            AddressAction::Delete => {
                 let message = AddressMessageBuilder::<Ipv4Addr>::new()
                     .index(index)
                     .address(net.addr(), net.prefix_len())
                     .build();
                 handle.address().del(message).execute().await
-            }
-            _ => {
-                log::warn!("Unknown virtual address action '{action}'");
-                continue;
             }
         };
 

@@ -28,6 +28,21 @@ pub(crate) struct TaskItems {
     generator: MutablePktGenerator,
 }
 
+#[derive(Debug)]
+pub enum AddressAction {
+    Add,
+    Delete,
+}
+
+impl std::fmt::Display for AddressAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Delete => write!(f, "delete"),
+        }
+    }
+}
+
 pub mod error {
     use std::error::Error;
     use std::fmt::Display;

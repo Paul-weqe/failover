@@ -22,8 +22,7 @@ use crate::observer::EventObserver;
 use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
-use crate::{NetResult, network};
-//use vrrp_packet::VrrpPacket;
+use crate::{AddressAction, NetResult, network};
 
 pub(crate) fn handle_incoming_arp_pkt(
     eth_packet: &EthernetPacket<'_>,
@@ -291,7 +290,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 vrouter.fsm.set_master_down_timer(m_down_interval);
             } else if vrouter.priority > vrrp_packet.priority {
                 virtual_address_action(
-                    "add",
+                    AddressAction::Add,
                     &vrouter.str_ipv4_addresses(),
                     &vrouter.network_interface,
                 );
@@ -344,7 +343,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             } else if adv_priority_gt_local_priority {
                 // delete virtual IP address
                 virtual_address_action(
-                    "delete",
+                    AddressAction::Delete,
                     &vrouter.str_ipv4_addresses(),
                     &vrouter.network_interface,
                 );
@@ -357,7 +356,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             } else if adv_priority_eq_local_priority {
                 // delete virtual IP address
                 virtual_address_action(
-                    "delete",
+                    AddressAction::Delete,
                     &vrouter.str_ipv4_addresses(),
                     &vrouter.network_interface,
                 );

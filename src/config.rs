@@ -368,7 +368,7 @@ fn configure_logging(log_file_path: Option<String>) {
     root_builder = root_builder.appender("stderr");
 
     let log_config = log_builder
-        .build(root_builder.build(LevelFilter::Trace))
+        .build(root_builder.build(LevelFilter::Debug))
         .unwrap();
     let _handler = log4rs::init_config(log_config);
 }

@@ -6,7 +6,7 @@ use crate::general::{get_interface, virtual_address_action};
 use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
-use crate::{NetResult, checksum, network};
+use crate::{AddressAction, NetResult, checksum, network};
 
 /// Listens for when any Event occurs in the Virtual Router.
 /// Events that can occur are: Startup,  Shutdown, MasterDown, Null  
@@ -88,7 +88,7 @@ impl EventObserver {
 
                     // Bring virtual IP back up.
                     virtual_address_action(
-                        "add",
+                        AddressAction::Add,
                         &vrouter.str_ipv4_addresses(),
                         &vrouter.network_interface,
                     );
@@ -102,7 +102,7 @@ impl EventObserver {
                 } else {
                     // Delete virtual IP.
                     virtual_address_action(
-                        "delete",
+                        AddressAction::Delete,
                         &vrouter.str_ipv4_addresses(),
                         &vrouter.network_interface,
                     );
@@ -203,7 +203,7 @@ impl EventObserver {
 
                 // Add virtual IP address.
                 virtual_address_action(
-                    "add",
+                    AddressAction::Add,
                     &vrouter.str_ipv4_addresses(),
                     &vrouter.network_interface,
                 );
