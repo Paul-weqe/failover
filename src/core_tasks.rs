@@ -1,92 +1,81 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use pnet::packet::Packet;
-use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
-use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
 use tokio::time;
 
 use crate::NetResult;
-use crate::general::create_datalink_channel;
+use crate::network::{ArpListener, VrrpListener};
 use crate::observer::EventObserver;
-/// This is the main file for the processes being run.
-/// There are three functions holding these processes
-/// functions that are to be run:
-///     - Network Process (pub(crate) fn network_process)
-///     - Timer Process (pub(crate) fn timer_process)
-///
-/// Each of the above will be run on a thread of their own.
-/// Avoided using async since they were only three separate threads needed.
 use crate::pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt};
 use crate::state_machine::Event;
 
-/// Waits for network connections and does the necessary actions.
-/// Acts on the queries mostly described from the state machine
-/// in chapter 6.3 onwards ofRFC 3768
-pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
-    // NetworkInterface
-    let interface = items.interface;
-
-    let (_sender, mut receiver) = create_datalink_channel(&interface)?;
+/// Listens for VRRP advertisements on a raw IP socket bound to the VRRP
+/// multicast group and hands each one off to the VRRP packet handler.
+pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
+    let listener = VrrpListener::bind(&items.interface.name).map_err(|err| {
+        crate::error::NetError(format!(
+            "Unable to bind VRRP listening socket: {err}"
+        ))
+    })?;
     let vrouter = items.vrouter;
 
     loop {
-        let buff = match receiver.next() {
+        let buf = match listener.recv().await {
             Ok(buf) => buf,
-            Err(_) => {
-                log::warn!("Error Receiving Packet");
+            Err(err) => {
+                log::warn!("Error receiving VRRP packet: {err}");
                 continue;
             }
         };
 
-        let incoming_eth_pkt = match EthernetPacket::new(buff) {
-            Some(incoming_eth_pkt) => incoming_eth_pkt,
+        let ip_packet = match Ipv4Packet::new(&buf) {
+            Some(pkt) => pkt,
+            None => {
+                log::warn!("Unable to read incoming IP packet");
+                continue;
+            }
+        };
+
+        if let Err(err) =
+            handle_incoming_vrrp_pkt(&ip_packet, Arc::clone(&vrouter))
+        {
+            log::warn!("problem handling incoming VRRP packet");
+            log::warn!("{err}");
+        }
+    }
+}
+
+/// Listens for ARP frames on a raw AF_PACKET socket bound to this
+/// interface and hands each one off to the ARP packet handler.
+pub(crate) async fn arp_process(items: crate::TaskItems) -> NetResult<()> {
+    let listener = ArpListener::bind(&items.interface.name).map_err(|err| {
+        crate::error::NetError(format!(
+            "Unable to bind ARP listening socket: {err}"
+        ))
+    })?;
+    let vrouter = items.vrouter;
+
+    loop {
+        let buf = match listener.recv().await {
+            Ok(buf) => buf,
+            Err(err) => {
+                log::warn!("Error receiving ARP packet: {err}");
+                continue;
+            }
+        };
+
+        let eth_packet = match EthernetPacket::new(&buf) {
+            Some(pkt) => pkt,
             None => continue,
         };
 
-        match incoming_eth_pkt.get_ethertype() {
-            EtherTypes::Ipv4 => {
-                let incoming_ip_pkt =
-                    match Ipv4Packet::new(incoming_eth_pkt.payload()) {
-                        Some(pkt) => pkt,
-                        // When there is no IPv4 packet received or the IP
-                        // packet is unable to be read.
-                        None => {
-                            log::warn!("Unable to read IP packet");
-                            continue;
-                        }
-                    };
-
-                if incoming_ip_pkt.get_next_level_protocol()
-                    == IpNextHeaderProtocols::Vrrp
-                {
-                    match handle_incoming_vrrp_pkt(
-                        &incoming_eth_pkt,
-                        Arc::clone(&vrouter),
-                    ) {
-                        Ok(_) => {}
-                        Err(_) => continue,
-                    }
-                }
-            }
-
-            EtherTypes::Arp => {
-                match handle_incoming_arp_pkt(
-                    &incoming_eth_pkt,
-                    Arc::clone(&vrouter),
-                ) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        log::error!("problem handing incoming ARP packet");
-                        log::error!("{err}");
-                    }
-                }
-            }
-
-            // TODO: forward non-VRRP/ARP traffic when MASTER, otherwise
-            // leave the packet be.
-            _ => {}
+        if let Err(err) =
+            handle_incoming_arp_pkt(&eth_packet, Arc::clone(&vrouter))
+        {
+            log::error!("problem handling incoming ARP packet");
+            log::error!("{err}");
         }
     }
 }
@@ -94,7 +83,7 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
 /// Used to track the various timers: (MasterDownTimer and Advertimer)
 /// Has been explained in RFC 3768 section 6.2
 pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
-    let mut interval = time::interval(Duration::from_millis(100));
+    let mut interval = time::interval(Duration::from_millis(1000));
     let vrouter = items.vrouter;
 
     loop {

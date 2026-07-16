@@ -75,6 +75,16 @@ pub(crate) fn handle_incoming_arp_pkt(
         }
 
         State::Master => {
+            // Ignore anything that isn't an ARP request, and ignore
+            // packets we sent ourselves (e.g. our own gratuitous ARPs
+            // looped back by the raw socket), otherwise we end up
+            // replying to our own reply forever.
+            if arp_packet.operation != 1
+                || arp_packet.sender_hw_address == interface_mac.octets()
+            {
+                return Ok(());
+            }
+
             // MUST respond to ARP requests for the IP address(es) associated
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
@@ -111,7 +121,7 @@ pub(crate) fn handle_incoming_arp_pkt(
 }
 
 pub(crate) fn handle_incoming_vrrp_pkt(
-    eth_packet: &EthernetPacket<'_>,
+    ip_packet: &Ipv4Packet<'_>,
     vrouter_mutex: Arc<Mutex<VirtualRouter>>,
 ) -> NetResult<()> {
     let mut vrouter = match vrouter_mutex.lock() {
@@ -119,13 +129,6 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         Err(err) => {
             log::warn!("problem fetching vrouter mutex");
             log::warn!("{err}");
-            return Ok(());
-        }
-    };
-    let ip_packet = match Ipv4Packet::new(eth_packet.payload()) {
-        Some(pkt) => pkt,
-        None => {
-            log::warn!("Unable to read incoming IP packet");
             return Ok(());
         }
     };
@@ -306,20 +309,12 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
 
         State::Master => {
-            let incoming_ip_pkt = match Ipv4Packet::new(eth_packet.payload()) {
-                Some(pkt) => pkt,
-                None => {
-                    let err = "Problem processing incoming IP packet";
-                    log::warn!("{err}");
-                    return Err(NetError(err.to_string()));
-                }
-            };
             let adv_priority_gt_local_priority =
                 vrrp_packet.priority > vrouter.priority;
             let adv_priority_eq_local_priority =
                 vrrp_packet.priority == vrouter.priority;
-            let _send_ip_gt_local_ip = incoming_ip_pkt.get_source()
-                > incoming_ip_pkt.get_destination();
+            let _send_ip_gt_local_ip =
+                ip_packet.get_source() > ip_packet.get_destination();
 
             // If an ADVERTISEMENT is received, then
             if vrrp_packet.priority == 0 {

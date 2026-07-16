@@ -3,9 +3,7 @@ use std::str::FromStr;
 
 use futures_util::stream::TryStreamExt;
 use ipnet::Ipv4Net;
-use pnet::datalink::{
-    self, Channel, DataLinkReceiver, DataLinkSender, NetworkInterface,
-};
+use pnet::datalink::{self, NetworkInterface};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rtnetlink::{AddressMessageBuilder, new_connection};
@@ -26,24 +24,6 @@ pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface> {
         None => Err(NetError(format!(
             "unable to find interface with name {name}"
         ))),
-    }
-}
-
-pub(crate) fn create_datalink_channel(
-    interface: &NetworkInterface,
-) -> NetResult<(Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>)> {
-    match pnet::datalink::channel(interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => Ok((tx, rx)),
-        Ok(_) => {
-            let err = "Unknown channel type";
-            log::error!("{err}");
-            Err(NetError(err.to_string()))
-        }
-        Err(err) => {
-            log::error!("Problem creating datalink channel");
-            log::error!("{err}");
-            Err(NetError("Problem creating datalink channel".to_string()))
-        }
     }
 }
 

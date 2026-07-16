@@ -86,9 +86,13 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()> {
     };
     let mut tasks_set = JoinSet::new();
 
-    // Sync process listens for any incoming network requests.
-    let network_items = items.clone();
-    tasks_set.spawn(async { core_tasks::network_process(network_items).await });
+    // Listens for incoming VRRP advertisements.
+    let vrrp_items = items.clone();
+    tasks_set.spawn(async { core_tasks::vrrp_process(vrrp_items).await });
+
+    // Listens for incoming ARP requests/replies.
+    let arp_items = items.clone();
+    tasks_set.spawn(async { core_tasks::arp_process(arp_items).await });
 
     let timer_items = items.clone();
     tasks_set.spawn(async { core_tasks::timer_process(timer_items).await });
