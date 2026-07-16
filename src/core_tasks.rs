@@ -1,4 +1,3 @@
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,6 +7,7 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use tokio::time;
 
+use crate::NetResult;
 use crate::general::create_datalink_channel;
 use crate::observer::EventObserver;
 /// This is the main file for the processes being run.
@@ -18,17 +18,15 @@ use crate::observer::EventObserver;
 ///
 /// Each of the above will be run on a thread of their own.
 /// Avoided using async since they were only three separate threads needed.
-use crate::packet::VrrpPacket;
 use crate::pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt};
-use crate::state_machine::{Event, State};
-use crate::{NetResult, checksum, network};
+use crate::state_machine::Event;
 
 /// Waits for network connections and does the necessary actions.
 /// Acts on the queries mostly described from the state machine
 /// in chapter 6.3 onwards ofRFC 3768
 pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
     // NetworkInterface
-    let interface = items.generator.interface;
+    let interface = items.interface;
 
     let (_sender, mut receiver) = create_datalink_channel(&interface)?;
     let vrouter = items.vrouter;
@@ -86,22 +84,9 @@ pub(crate) async fn network_process(items: crate::TaskItems) -> NetResult<()> {
                 }
             }
 
-            _ => {
-                // see if we can get the vrouter
-                let lock = &vrouter.lock();
-                let net_vr = match lock {
-                    Ok(net_vr) => net_vr,
-                    Err(err) => {
-                        log::warn!("Cannot Get router mutex");
-                        log::warn!("{err}");
-                        continue;
-                    }
-                };
-
-                // if we are master, we forward the packet.
-                // otherwise we leave the packet be
-                if net_vr.fsm.state == State::Master {}
-            }
+            // TODO: forward non-VRRP/ARP traffic when MASTER, otherwise
+            // leave the packet be.
+            _ => {}
         }
     }
 }
@@ -150,28 +135,7 @@ pub(crate) async fn timer_process(items: crate::TaskItems) -> NetResult<()> {
                 match vrouter.fsm.timer.waiting_for {
                     Some(waiting) => {
                         if Instant::now() > waiting {
-                            // send vrrp advertisement
-                            let mut addresses: Vec<Ipv4Addr> = vec![];
-                            vrouter.ip_addresses.iter().for_each(|ip| {
-                                addresses.push(ip.addr());
-                            });
-                            let mut pkt = VrrpPacket {
-                                vrid: vrouter.vrid,
-                                priority: vrouter.priority,
-                                count_ip: vrouter.ip_addresses.len() as u8,
-                                adver_int: vrouter.advert_interval,
-                                checksum: 0,
-                                ip_addresses: addresses,
-                            };
-                            // Confirm checksum. checksum position is the third
-                            // item in 16 bit words.
-                            pkt.checksum =
-                                checksum::calculate(&pkt.encode(), 3);
-
-                            let _ = network::send_vrrp_packet(
-                                &vrouter.network_interface,
-                                pkt,
-                            );
+                            vrouter.send_advertisement();
                             let advert_time = vrouter.advert_interval as f32;
                             vrouter.fsm.set_advert_timer(advert_time);
                         }

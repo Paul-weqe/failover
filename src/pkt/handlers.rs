@@ -10,6 +10,7 @@ use core::f32;
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 
+use internet_checksum::Checksum;
 use ipnet::Ipv4Net;
 use pnet::datalink;
 use pnet::packet::Packet;
@@ -171,18 +172,29 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         //      Data)
 
         // 4. MUST verify the VRRP checksum.
-        //      rfc1071() function should return value with all 1's
+        // TODO: Make sure the checksum check is handled
+
+        let mut check = Checksum::new();
+        check.add_bytes(ip_packet.payload());
+        if check.checksum() != [0, 0] {
+            error = format!(
+                "({}) Invalid checksum on incoming VRRP packet",
+                vrouter.name
+            );
+            log::warn!("{error}");
+            return Result::Err(NetError(error));
+        }
 
         // 5. MUST verify that the VRID is configured on the receiving interface
         //      and the local router is not the IP Address owner (Priority equals
         //      255 (decimal)).
-        //      TODO Once implemented multiple interfaces
+        //      TODO: Once implemented multiple interfaces
         if vrrp_packet.vrid != vrouter.vrid {
             return Ok(());
         }
 
         // 6. Auth Type must be same.
-        //      TODO once multiple authentication types are configured
+        //      TODO: once multiple authentication types are configured
 
         // 7. MUST verify that the Adver Interval in the packet is the same as
         //      the locally configured for this virtual router
@@ -211,15 +223,6 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         let count_check =
             vrrp_packet.count_ip == vrouter.ip_addresses.len() as u8;
         let mut addr_check = true;
-
-        if vrrp_packet.ip_addresses.clone().len() % 4 != 0 {
-            error = format!(
-                "({}) Invalid Ip Addresses in vrrp packet",
-                vrouter.name
-            );
-            log::error!("{error}");
-            return Result::Err(NetError(error));
-        }
 
         let mut addr: Vec<u8> = vec![];
         for (counter, ip_ad) in vrrp_packet.ip_addresses.iter().enumerate() {
@@ -321,21 +324,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             // If an ADVERTISEMENT is received, then
             if vrrp_packet.priority == 0 {
                 // send ADVERTISEMENT
-                let mut ips: Vec<Ipv4Addr> = vec![];
-                for addr in vrouter.ip_addresses.clone() {
-                    ips.push(addr.addr());
-                }
-
-                let pkt = VrrpPacket {
-                    vrid: vrouter.vrid,
-                    priority: vrouter.priority,
-                    count_ip: vrouter.ip_addresses.len() as u8,
-                    adver_int: vrouter.advert_interval,
-                    checksum: 0,
-                    ip_addresses: ips,
-                };
-                let _ =
-                    network::send_vrrp_packet(&vrouter.network_interface, pkt);
+                vrouter.send_advertisement();
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);
 

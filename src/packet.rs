@@ -1,6 +1,7 @@
 use std::net::Ipv4Addr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use internet_checksum::Checksum;
 
 //
 // VRRP Packet Format.
@@ -38,7 +39,7 @@ pub struct VrrpPacket {
 impl VrrpPacket {
     const MIN_PKT_LENGTH: usize = 16;
     const MAX_PKT_LENGTH: usize = 80;
-    const MAX_IP_COUNT: usize = 16;
+    pub(crate) const MAX_IP_COUNT: usize = 16;
 
     // Header elements that remain as const.
     const VRRP_VERSION: u8 = 2;
@@ -61,7 +62,7 @@ impl VrrpPacket {
 
         // Checksum.
         buf.put_u16(0);
-        for addr in self.ip_addresses.clone() {
+        for addr in &self.ip_addresses {
             let octets = addr.octets();
             octets.iter().for_each(|octet| buf.put_u8(*octet));
         }
@@ -69,12 +70,15 @@ impl VrrpPacket {
         // Auth data1 & Auth Data2, only for backward compatibility.
         buf.put_u32(0);
         buf.put_u32(0);
+
+        let mut check = Checksum::new();
+        check.add_bytes(&buf);
+        buf[6..8].copy_from_slice(&check.checksum());
         buf
     }
 
     // TODO: Change this to a Result<Self> return.
     pub fn decode(data: &[u8]) -> Option<Self> {
-        // 1. pkt length verification
         let pkt_size = data.len();
 
         let mut buf: Bytes = Bytes::copy_from_slice(data);
@@ -192,25 +196,12 @@ impl ArpPacket {
         let proto_length = buf.get_u8();
         let operation = buf.get_u16();
 
-        let sender_hw_address: [u8; 6] = [0_u8; 6];
-        for mut _x in &sender_hw_address {
-            _x = &buf.get_u8();
-        }
-
-        let sender_proto_address: [u8; 4] = [0_u8; 4];
-        for mut _x in &sender_proto_address {
-            _x = &buf.get_u8();
-        }
-
-        let target_hw_address: [u8; 6] = [0_u8; 6];
-        for mut _x in &target_hw_address {
-            _x = &buf.get_u8();
-        }
-
-        let target_proto_address: [u8; 4] = [0_u8; 4];
-        for mut _x in &target_proto_address {
-            _x = &buf.get_u8();
-        }
+        let sender_hw_address: [u8; 6] = std::array::from_fn(|_| buf.get_u8());
+        let sender_proto_address: [u8; 4] =
+            std::array::from_fn(|_| buf.get_u8());
+        let target_hw_address: [u8; 6] = std::array::from_fn(|_| buf.get_u8());
+        let target_proto_address: [u8; 4] =
+            std::array::from_fn(|_| buf.get_u8());
 
         Some(Self {
             hw_type,

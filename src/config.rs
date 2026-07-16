@@ -5,7 +5,6 @@ use std::io::{BufReader, Write};
 use std::path::Path;
 
 use clap::Parser;
-use ipnet::Ipv4Net;
 use log::LevelFilter;
 use log4rs::Config;
 use log4rs::append::console::ConsoleAppender;
@@ -70,18 +69,6 @@ pub struct CliConfig {
     pub ip_addresses: Vec<String>,
     pub interface_name: String,
 
-    pub priority: u8,
-    pub advert_interval: u8,
-    pub preempt_mode: bool,
-    pub action: Action,
-}
-
-#[derive(Debug, Clone)]
-pub struct BaseConfig {
-    pub name: Option<String>,
-    pub vrid: u8,
-    pub ip_addresses: Vec<Ipv4Net>,
-    pub interface_name: String,
     pub priority: u8,
     pub advert_interval: u8,
     pub preempt_mode: bool,

@@ -4,21 +4,25 @@ use libc::AF_PACKET;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::io::unix::AsyncFd;
 
-use crate::checksum;
 use crate::packet::{ARPframe, VrrpPacket};
+
+// IANA-assigned IP protocol number for VRRP.
+const VRRP_PROTOCOL_NUMBER: i32 = 112;
 
 pub fn send_vrrp_packet(
     ifname: &str,
-    mut packet: VrrpPacket,
+    packet: VrrpPacket,
 ) -> std::io::Result<usize> {
-    let sock = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::from(112)))
-        .unwrap();
+    let sock = Socket::new(
+        Domain::IPV4,
+        Type::RAW,
+        Some(Protocol::from(VRRP_PROTOCOL_NUMBER)),
+    )
+    .unwrap();
     let _ = sock.bind_device(Some(ifname.as_bytes()));
     let _ = sock.set_broadcast(true);
     let _ = sock.set_ttl(255);
-
-    // confirm checksum. checksum position is the third item in 16 bit words
-    packet.checksum = checksum::calculate(&packet.encode(), 3);
+    let _ = sock.set_multicast_ttl_v4(255);
 
     let buf: &[u8] = &packet.encode();
     let saddr = SocketAddrV4::new(Ipv4Addr::new(224, 0, 0, 18), 0);

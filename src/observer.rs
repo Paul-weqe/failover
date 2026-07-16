@@ -1,15 +1,13 @@
-use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::NetError;
 use crate::general::{get_interface, virtual_address_action};
-use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
-use crate::{AddressAction, NetResult, checksum, network};
+use crate::{AddressAction, NetResult};
 
 /// Listens for when any Event occurs in the Virtual Router.
-/// Events that can occur are: Startup,  Shutdown, MasterDown, Null  
+/// Events that can occur are: Startup,  Shutdown, MasterDown, Null
 /// Actions happening on when each of these Events is fired are
 /// Specified in RFC 3768 section 6.3, 6.4 and 6.5
 #[derive(Debug, Clone)]
@@ -41,50 +39,8 @@ impl EventObserver {
         match event {
             Event::Startup if vrouter.fsm.state == State::Init => {
                 if vrouter.priority == 255 {
-                    // Send VRRP advertisement.
-                    let mut addresses: Vec<Ipv4Addr> = vec![];
-                    vrouter.ip_addresses.iter().for_each(|ip| {
-                        addresses.push(ip.addr());
-                    });
-
-                    let mut pkt = VrrpPacket {
-                        vrid: vrouter.vrid,
-                        priority: vrouter.priority,
-                        count_ip: vrouter.ip_addresses.len() as u8,
-                        adver_int: vrouter.advert_interval,
-                        checksum: 0,
-                        ip_addresses: addresses,
-                    };
-
-                    // Confirm checksum. checksum position is the third item
-                    // in 16 bit words.
-                    pkt.checksum = checksum::calculate(&pkt.encode(), 3);
-
-                    let _ = network::send_vrrp_packet(
-                        &vrouter.network_interface,
-                        pkt,
-                    );
-
-                    for ip in &vrouter.ip_addresses {
-                        let eth_frame = EthernetFrame {
-                            dst_mac: [0xff; 6],
-                            src_mac: interface.mac.unwrap().octets(),
-                            ethertype: 0x0806,
-                        };
-                        let arp_pkt = ArpPacket {
-                            hw_type: 1,
-                            proto_type: 0x0800,
-                            hw_length: 6,
-                            proto_length: 4,
-                            operation: 1,
-                            sender_hw_address: interface.mac.unwrap().octets(),
-                            sender_proto_address: ip.addr().octets(),
-                            target_hw_address: [0xff; 6],
-                            target_proto_address: ip.addr().octets(),
-                        };
-                        let arp_frame = ARPframe::new(eth_frame, arp_pkt);
-                        network::send_packet_arp(&interface.name, arp_frame);
-                    }
+                    vrouter.send_advertisement();
+                    vrouter.send_gratuitous_arps(interface.mac.unwrap().octets());
 
                     // Bring virtual IP back up.
                     virtual_address_action(
@@ -123,28 +79,7 @@ impl EventObserver {
                     }
                     State::Master => {
                         vrouter.fsm.disable_timer();
-                        // Send ADVERTIEMENT.
-                        let mut addresses: Vec<Ipv4Addr> = vec![];
-                        vrouter.ip_addresses.iter().for_each(|ip| {
-                            addresses.push(ip.addr());
-                        });
-
-                        let mut pkt = VrrpPacket {
-                            vrid: vrouter.vrid,
-                            priority: vrouter.priority,
-                            count_ip: vrouter.ip_addresses.len() as u8,
-                            adver_int: vrouter.advert_interval,
-                            checksum: 0,
-                            ip_addresses: addresses,
-                        };
-                        // Confirm checksum. checksum position is the third
-                        // item in 16 bit words.
-                        pkt.checksum = checksum::calculate(&pkt.encode(), 3);
-
-                        let _ = network::send_vrrp_packet(
-                            &vrouter.network_interface,
-                            pkt,
-                        );
+                        vrouter.send_advertisement();
                         vrouter.fsm.state = State::Init;
                     }
                     State::Init => {}
@@ -152,54 +87,8 @@ impl EventObserver {
             }
             Event::MasterDown if vrouter.fsm.state == State::Backup => {
                 // Send ADVERTIEMENT then send gratuitous ARP.
-
-                // VRRP advertisement.
-                {
-                    let mut ips: Vec<Ipv4Addr> = vec![];
-                    for addr in vrouter.ip_addresses.clone() {
-                        ips.push(addr.addr());
-                    }
-                    let mut pkt = VrrpPacket {
-                        vrid: vrouter.vrid,
-                        priority: vrouter.priority,
-                        count_ip: vrouter.ip_addresses.len() as u8,
-                        checksum: 0,
-                        adver_int: vrouter.advert_interval,
-                        ip_addresses: ips,
-                    };
-                    // Confirm checksum. checksum position is the third item
-                    // in 16 bit words.
-                    pkt.checksum = checksum::calculate(&pkt.encode(), 3);
-
-                    let _ = network::send_vrrp_packet(
-                        vrouter.network_interface.as_str(),
-                        pkt,
-                    );
-                }
-
-                // Gratuitous ARP.
-                {
-                    for ip in &vrouter.ip_addresses {
-                        let eth_frame = EthernetFrame {
-                            dst_mac: [0xff; 6],
-                            src_mac: interface.mac.unwrap().octets(),
-                            ethertype: 0x0806,
-                        };
-                        let arp_pkt = ArpPacket {
-                            hw_type: 1,
-                            proto_type: 0x0800,
-                            hw_length: 6,
-                            proto_length: 4,
-                            operation: 1,
-                            sender_hw_address: interface.mac.unwrap().octets(),
-                            sender_proto_address: ip.addr().octets(),
-                            target_hw_address: [0xff; 6],
-                            target_proto_address: ip.addr().octets(),
-                        };
-                        let arp_frame = ARPframe::new(eth_frame, arp_pkt);
-                        network::send_packet_arp(&interface.name, arp_frame);
-                    }
-                }
+                vrouter.send_advertisement();
+                vrouter.send_gratuitous_arps(interface.mac.unwrap().octets());
 
                 // Add virtual IP address.
                 virtual_address_action(

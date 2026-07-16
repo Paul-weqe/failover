@@ -12,7 +12,8 @@ use rtnetlink::{AddressMessageBuilder, new_connection};
 
 use crate::config::VrrpConfig;
 use crate::error::NetError;
-use crate::router::VirtualRouter;
+use crate::packet::VrrpPacket;
+use crate::router::{VirtualRouter, VirtualRouterParams};
 use crate::{AddressAction, NetResult};
 
 pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface> {
@@ -50,17 +51,18 @@ pub(crate) fn create_datalink_channel(
 //  router instance.
 pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
     let mut ips: Vec<Ipv4Net> = vec![];
-    if conf.ip_addresses().len() > 20 {
+    let max_ip_count = VrrpPacket::MAX_IP_COUNT;
+    if conf.ip_addresses().len() > max_ip_count {
         log::warn!(
-            "({})  More than 20 IP addresses(max for VRRP) have been configured. Only first 20 addresses will be used..",
+            "({})  More than {max_ip_count} IP addresses(max for VRRP) have been configured. Only first {max_ip_count} addresses will be used..",
             conf.name()
         );
     }
 
-    let addresses = if conf.ip_addresses().len() <= 20 {
+    let addresses = if conf.ip_addresses().len() <= max_ip_count {
         conf.ip_addresses()
     } else {
-        conf.ip_addresses()[0..20].to_vec()
+        conf.ip_addresses()[0..max_ip_count].to_vec()
     };
     for ip_config in addresses.iter() {
         // TODO: have error logging if this is Err.
@@ -69,15 +71,15 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
         }
     }
 
-    let vr = VirtualRouter::new(
-        conf.name(),
-        conf.vrid(),
-        ips,
-        conf.priority(),
-        conf.advert_interval(),
-        conf.preempt_mode(),
-        conf.interface_name(),
-    );
+    let vr = VirtualRouter::new(VirtualRouterParams {
+        name: conf.name(),
+        vrid: conf.vrid(),
+        ip_addresses: ips,
+        priority: conf.priority(),
+        advert_interval: conf.advert_interval(),
+        preempt_mode: conf.preempt_mode(),
+        network_interface: conf.interface_name(),
+    });
     log::info!("({}) Entered {:?} state.", vr.name, vr.fsm.state);
     vr
 }
@@ -163,7 +165,7 @@ async fn apply_address_action(
         };
 
         if let Err(err) = result {
-            log::warn!(
+            log::trace!(
                 "Problem performing netlink '{action}' for {addr} on {interface_name}: {err}"
             );
         }

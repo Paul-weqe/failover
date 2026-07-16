@@ -12,6 +12,7 @@ documentation = "https://failover-docs.readthedocs.io/en/latest/install.html#run
 
 [dependencies]
 byteorder = "1.5.0"
+internet-checksum = "0.2"
 ipnet = { version = "2.9.0", features = ["serde"]}
 log = "0.4.21"
 pnet = "0.33.0"

@@ -3,12 +3,11 @@ use std::sync::{Arc, Mutex};
 use error::{NetError, OptError};
 use general::get_interface;
 use observer::EventObserver;
-use pkt::generators::{self, MutablePktGenerator};
+use pnet::datalink::NetworkInterface;
 use router::VirtualRouter;
 use state_machine::Event;
 use tokio::task::JoinSet;
 
-mod checksum;
 pub mod config;
 mod core_tasks;
 pub mod general;
@@ -25,7 +24,7 @@ pub(crate) type OptResult<T> = Result<T, OptError>;
 #[derive(Clone)]
 pub(crate) struct TaskItems {
     vrouter: Arc<Mutex<VirtualRouter>>,
-    generator: MutablePktGenerator,
+    interface: NetworkInterface,
 }
 
 #[derive(Debug)]
@@ -75,7 +74,7 @@ pub async fn run(vrouter: VirtualRouter) -> NetResult<()> {
 
     let items = TaskItems {
         vrouter: Arc::new(Mutex::new(vrouter)),
-        generator: generators::MutablePktGenerator::new(interface.clone()),
+        interface,
     };
 
     match EventObserver::notify(items.vrouter.clone(), Event::Startup) {
