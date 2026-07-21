@@ -124,6 +124,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     ip_packet: &Ipv4Packet<'_>,
     vrouter_mutex: Arc<Mutex<VirtualRouter>>,
 ) -> NetResult<()> {
+    let mut error: String;
     let mut vrouter = match vrouter_mutex.lock() {
         Ok(vr) => vr,
         Err(err) => {
@@ -141,21 +142,14 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
     };
 
-    let mut error;
-
-    // TODO {
-    //      - currently we are looking at the first IP address of the interface
-    //          that is sending the data.
-    //      - this should be changed to looking through all the IP addresses in
-    //          the device.
-    // }
-    // received packets from the same device
     for interface in datalink::interfaces().iter() {
-        if let Some(ip) = interface.ips.first() {
-            if ip.ip() == ip_packet.get_source() {
-                return Ok(());
-            }
-        };
+        if interface
+            .ips
+            .iter()
+            .any(|ip| ip.ip() == ip_packet.get_source())
+        {
+            return Ok(());
+        }
     }
 
     // MUST DO verifications(rfc3768 section 7.1).
