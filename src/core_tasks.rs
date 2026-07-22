@@ -14,11 +14,12 @@ use crate::state_machine::Event;
 /// Listens for VRRP advertisements on a raw IP socket bound to the VRRP
 /// multicast group and hands each one off to the VRRP packet handler.
 pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
-    let listener = VrrpListener::bind(&items.interface.name).map_err(|err| {
-        crate::error::NetError(format!(
-            "Unable to bind VRRP listening socket: {err}"
-        ))
-    })?;
+    let listener =
+        VrrpListener::bind(&items.parent_interface.name).map_err(|err| {
+            crate::error::NetError(format!(
+                "Unable to bind VRRP listening socket: {err}"
+            ))
+        })?;
     let vrouter = items.vrouter;
 
     loop {

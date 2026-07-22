@@ -6,7 +6,10 @@ use ipnet::Ipv4Net;
 use pnet::datalink::{self, NetworkInterface};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
-use rtnetlink::{AddressMessageBuilder, new_connection};
+use rtnetlink::packet_route::link::{
+    InfoKind, LinkAttribute, LinkInfo, LinkMessage, MacVlanMode,
+};
+use rtnetlink::{AddressMessageBuilder, LinkMacVlan, new_connection};
 
 use crate::config::VrrpConfig;
 use crate::error::NetError;
@@ -25,6 +28,26 @@ pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface> {
             "unable to find interface with name {name}"
         ))),
     }
+}
+
+/// The first IPv4 address configured on `interface`.
+/// Used as the source address for VRRP advertisements.
+pub(crate) fn primary_ipv4(
+    interface: &NetworkInterface,
+) -> NetResult<Ipv4Addr> {
+    interface
+        .ips
+        .iter()
+        .find_map(|ip| match ip.ip() {
+            IpAddr::V4(addr) => Some(addr),
+            IpAddr::V6(_) => None,
+        })
+        .ok_or_else(|| {
+            NetError(format!(
+                "Interface {} has no IPv4 address configured",
+                interface.name
+            ))
+        })
 }
 
 // Takes the configs that have been received and converts them into a virtual
@@ -147,6 +170,179 @@ async fn apply_address_action(
         if let Err(err) = result {
             log::trace!(
                 "Problem performing netlink '{action}' for {addr} on {interface_name}: {err}"
+            );
+        }
+    }
+}
+
+fn fnv1a_hash(input: &str) -> u32 {
+    const FNV_OFFSET_BASIS: u32 = 0x811c_9dc5;
+    const FNV_PRIME: u32 = 0x0100_0193;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in input.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// mvlan interface name:
+///     `fover-{vrid}-{5 hex digit hash of the parent name}`.
+fn mac_vlan_name(parent_ifname: &str, vrid: u8) -> String {
+    let hash = fnv1a_hash(parent_ifname) & 0xF_FFFF;
+    format!("fover-{vrid}-{hash:05x}")
+}
+
+/// Whether a failed netlink link lookup failed specifically because the
+/// requested interface doesn't exist (ENODEV), as opposed to some other,
+/// genuine failure.
+fn is_no_such_device(err: &rtnetlink::Error) -> bool {
+    matches!(
+        err,
+        rtnetlink::Error::NetlinkError(msg)
+            if msg.code == std::num::NonZeroI32::new(-libc::ENODEV)
+    )
+}
+
+fn link_is_mac_vlan(link: &LinkMessage) -> bool {
+    for attr in &link.attributes {
+        if let LinkAttribute::LinkInfo(infos) = attr {
+            for info in infos {
+                if let LinkInfo::Kind(InfoKind::MacVlan) = info {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub(crate) async fn create_mac_vlan(
+    parent_ifname: &str,
+    vrid: u8,
+) -> NetResult<String> {
+    let name = mac_vlan_name(parent_ifname, vrid);
+
+    let (connection, handle, _) = match new_connection() {
+        Ok(conn) => conn,
+        Err(err) => {
+            return Err(NetError(format!(
+                "Unable to open netlink connection: {err}"
+            )));
+        }
+    };
+    tokio::spawn(connection);
+
+    // Check if an interface with the name exists.
+    let mut existing = handle.link().get().match_name(name.clone()).execute();
+
+    match existing.try_next().await {
+        Ok(Some(link)) => {
+            if !link_is_mac_vlan(&link) {
+                return Err(NetError(format!(
+                    "Interface {name} already exists and is not a mac-vlan; refusing to remove it"
+                )));
+            }
+            log::warn!(
+                "Removing stale mac-vlan {name} left over from a prior run"
+            );
+            if let Err(err) =
+                handle.link().del(link.header.index).execute().await
+            {
+                return Err(NetError(format!(
+                    "Unable to remove stale mac-vlan {name}: {err}"
+                )));
+            }
+        }
+        Ok(None) => {}
+        Err(err) if is_no_such_device(&err) => {}
+        Err(err) => {
+            return Err(NetError(format!(
+                "Problem checking for existing interface {name}: {err}"
+            )));
+        }
+    }
+
+    let mut parents = handle
+        .link()
+        .get()
+        .match_name(parent_ifname.to_string())
+        .execute();
+    let parent_index = match parents.try_next().await {
+        Ok(Some(link)) => link.header.index,
+        Ok(None) => {
+            return Err(NetError(format!(
+                "Unable to find parent interface {parent_ifname}"
+            )));
+        }
+        Err(err) => {
+            return Err(NetError(format!(
+                "Problem fetching parent interface {parent_ifname}: {err}"
+            )));
+        }
+    };
+
+    let virtual_mac = vec![0x00, 0x00, 0x5e, 0x00, 0x01, vrid];
+    let message = LinkMacVlan::new(&name, parent_index, MacVlanMode::Bridge)
+        .up()
+        .address(virtual_mac)
+        .build();
+
+    if let Err(err) = handle.link().add(message).execute().await {
+        return Err(NetError(format!(
+            "Unable to create mac-vlan interface {name}: {err}"
+        )));
+    }
+
+    let arp_ignore_path = format!("/proc/sys/net/ipv4/conf/{name}/arp_ignore");
+    if let Err(err) = tokio::fs::write(&arp_ignore_path, b"8").await {
+        log::warn!(
+            "Unable to disable kernel ARP replies on {name} ({arp_ignore_path}): {err}"
+        );
+    }
+
+    log::info!("Created mac-vlan {name} (parent {parent_ifname}, vrid {vrid})");
+    Ok(name)
+}
+
+/// Deletes the mac-vlan interface created by [`create_mac_vlan`]. Deleting
+/// the link removes any address(es) still assigned to it in one shot.
+pub(crate) fn delete_mac_vlan(name: &str) {
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(apply_delete_mac_vlan(name));
+    });
+}
+
+async fn apply_delete_mac_vlan(name: &str) {
+    let (connection, handle, _) = match new_connection() {
+        Ok(conn) => conn,
+        Err(err) => {
+            log::error!("Unable to open netlink connection: {err}");
+            return;
+        }
+    };
+    tokio::spawn(connection);
+
+    let mut links = handle.link().get().match_name(name.to_string()).execute();
+    match links.try_next().await {
+        Ok(Some(link)) => {
+            if let Err(err) =
+                handle.link().del(link.header.index).execute().await
+            {
+                log::error!(
+                    "Problem deleting mac-vlan interface {name}: {err}"
+                );
+            }
+        }
+        Ok(None) => {
+            log::warn!(
+                "mac-vlan interface {name} not found; nothing to delete"
+            );
+        }
+        Err(err) => {
+            log::error!(
+                "Problem fetching mac-vlan interface {name} for deletion: {err}"
             );
         }
     }

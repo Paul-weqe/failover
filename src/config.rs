@@ -39,9 +39,6 @@ fn default_advert_int() -> u8 {
 fn default_preempt_mode() -> bool {
     true
 }
-fn default_action() -> Action {
-    Action::Run
-}
 
 // for reading JSON config file
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -58,8 +55,6 @@ pub struct FileConfig {
     pub advert_interval: u8,
     #[serde(default = "default_preempt_mode")]
     pub preempt_mode: bool,
-    #[serde(default = "default_action")]
-    pub action: Action,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +67,6 @@ pub struct CliConfig {
     pub priority: u8,
     pub advert_interval: u8,
     pub preempt_mode: bool,
-    pub action: Action,
 }
 
 #[derive(Debug, Clone)]
@@ -138,36 +132,14 @@ impl VrrpConfig {
             VrrpConfig::Cli(config) => config.preempt_mode,
         }
     }
-
-    pub fn action(&self) -> Action {
-        match self {
-            VrrpConfig::File(config) => config.action.clone(),
-            VrrpConfig::Cli(config) => config.action.clone(),
-        }
-    }
 }
 
 #[derive(Parser, Debug)]
 #[command(name = "Version")]
 #[command(about = "Runs the VRRP protocol", long_about = None)]
-pub struct CliArgs2 {
-    #[command(
-        subcommand,
-        help = "`run` for starting the VRRP instances and `teardown` for stopping them"
-    )]
-    cfg: Cfg,
-}
-
-#[derive(Parser, Debug)]
-enum Cfg {
-    Run {
-        #[command(subcommand)]
-        mode: Mode,
-    },
-    Teardown {
-        #[command(subcommand)]
-        mode: Mode,
-    },
+pub struct CliArgs {
+    #[command(subcommand)]
+    mode: Mode,
 }
 
 #[derive(Parser, Debug)]
@@ -235,20 +207,11 @@ enum Mode {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Action {
-    Run,
-    Teardown,
+pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
+    load_mode(args.mode)
 }
 
-pub fn parse_cli_opts(args: CliArgs2) -> OptResult<Vec<VrrpConfig>> {
-    match args.cfg {
-        Cfg::Run { mode } => load_mode(mode, Action::Run),
-        Cfg::Teardown { mode } => load_mode(mode, Action::Teardown),
-    }
-}
-
-fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
+fn load_mode(mode: Mode) -> OptResult<Vec<VrrpConfig>> {
     match mode {
         Mode::FileMode {
             filename,
@@ -293,8 +256,7 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
             let mut configs: Vec<VrrpConfig> = vec![];
             match read_json_config(&fpath) {
                 Ok(vec_config) => {
-                    for mut config_item in vec_config {
-                        config_item.action = action.clone();
+                    for config_item in vec_config {
                         configs.push(VrrpConfig::File(config_item));
                     }
                 }
@@ -330,7 +292,6 @@ fn load_mode(mode: Mode, action: Action) -> OptResult<Vec<VrrpConfig>> {
                 priority,
                 advert_interval,
                 preempt_mode,
-                action,
             };
             Ok(vec![VrrpConfig::Cli(config)])
         }

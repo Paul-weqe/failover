@@ -17,6 +17,8 @@ pub struct VirtualRouter {
     pub master_down_interval: f32,
     pub preempt_mode: bool,
     pub network_interface: String,
+    pub mac_vlan_interface: String,
+    pub primary_ip: Ipv4Addr,
     pub fsm: VirtualRouterMachine,
 }
 
@@ -64,6 +66,8 @@ impl VirtualRouter {
             master_down_interval,
             preempt_mode,
             network_interface,
+            mac_vlan_interface: String::new(),
+            primary_ip: Ipv4Addr::UNSPECIFIED,
             fsm: VirtualRouterMachine::default(),
         }
     }
@@ -80,7 +84,11 @@ impl VirtualRouter {
             ip_addresses: self.ipv4_addresses(),
         };
 
-        let _ = network::send_vrrp_packet(&self.network_interface, pkt);
+        let _ = network::send_vrrp_packet(
+            &self.mac_vlan_interface,
+            self.primary_ip,
+            pkt,
+        );
     }
 
     /// Sends a gratuitous ARP for each of this router's configured IP
@@ -104,7 +112,7 @@ impl VirtualRouter {
                 target_proto_address: ip.addr().octets(),
             };
             let arp_frame = ARPframe::new(eth_frame, arp_pkt);
-            network::send_packet_arp(&self.network_interface, arp_frame);
+            network::send_packet_arp(&self.mac_vlan_interface, arp_frame);
         }
     }
 }

@@ -4,10 +4,10 @@ use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::AsRawFd;
 
-use libc::{
-    AF_PACKET, PACKET_OUTGOING, c_void, sendto, sockaddr, sockaddr_ll,
+use libc::{AF_PACKET, PACKET_OUTGOING, c_void, sendto, sockaddr, sockaddr_ll};
+use socket2::{
+    Domain, InterfaceIndexOrAddress, Protocol, SockAddr, Socket, Type,
 };
-use socket2::{Domain, InterfaceIndexOrAddress, Protocol, SockAddr, Socket, Type};
 use tokio::io::unix::AsyncFd;
 
 use crate::packet::{ARPframe, VrrpPacket};
@@ -32,8 +32,8 @@ fn if_index(ifname: &str) -> io::Result<u32> {
 fn arp_link_addr(ifindex: u32) -> SockAddr {
     let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     unsafe {
-        let sll = (&mut storage as *mut libc::sockaddr_storage)
-            .cast::<sockaddr_ll>();
+        let sll =
+            (&mut storage as *mut libc::sockaddr_storage).cast::<sockaddr_ll>();
         (*sll).sll_family = AF_PACKET as u16;
         (*sll).sll_protocol = (libc::ETH_P_ARP as u16).to_be();
         (*sll).sll_ifindex = ifindex as i32;
@@ -43,13 +43,15 @@ fn arp_link_addr(ifindex: u32) -> SockAddr {
 }
 
 /// Sends a single VRRP advertisement to the VRRP multicast group
-/// (224.0.0.18) over `ifname`.
+/// (224.0.0.18) over `ifname`, sourced from `src_ip`.
 ///
 /// Opens a fresh socket per call: VRRP advertisements are infrequent (once
 /// per advertisement interval, typically ~1s), so the overhead of a
 /// throwaway socket is negligible next to the simplicity it buys.
+/// `ifname` is the name of the mac-vlan interface.
 pub fn send_vrrp_packet(
     ifname: &str,
+    src_ip: Ipv4Addr,
     packet: VrrpPacket,
 ) -> io::Result<usize> {
     let sock = Socket::new(
@@ -58,7 +60,7 @@ pub fn send_vrrp_packet(
         Some(Protocol::from(VRRP_PROTOCOL_NUMBER)),
     )?;
     sock.bind_device(Some(ifname.as_bytes()))?;
-    sock.set_broadcast(true)?;
+    sock.bind(&SocketAddrV4::new(src_ip, 0).into())?;
     sock.set_ttl(255)?;
     sock.set_multicast_ttl_v4(255)?;
 
@@ -205,9 +207,8 @@ impl ArpListener {
                 Err(_would_block) => continue,
             };
 
-            let pkttype = unsafe {
-                (*addr.as_ptr().cast::<sockaddr_ll>()).sll_pkttype
-            };
+            let pkttype =
+                unsafe { (*addr.as_ptr().cast::<sockaddr_ll>()).sll_pkttype };
             if pkttype == PACKET_OUTGOING {
                 continue;
             }

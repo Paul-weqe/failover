@@ -1,12 +1,11 @@
 use clap::Parser;
-use failover_vr::AddressAction;
-use failover_vr::config::{Action, CliArgs2, parse_cli_opts};
-use failover_vr::general::{config_to_vr, virtual_address_action};
+use failover_vr::config::{CliArgs, parse_cli_opts};
+use failover_vr::general::config_to_vr;
 use tokio::task::JoinSet;
 
 #[tokio::main]
 async fn main() {
-    let args = CliArgs2::parse();
+    let args = CliArgs::parse();
     let routers_config = match parse_cli_opts(args) {
         Ok(config) => {
             log::debug!("Configs read successfully");
@@ -20,21 +19,8 @@ async fn main() {
 
     let mut routers_tasks = JoinSet::new();
     for config in routers_config {
-        match config.action() {
-            Action::Run => {
-                let vrouter = config_to_vr(config);
-                routers_tasks.spawn(async { failover_vr::run(vrouter).await });
-            }
-            Action::Teardown => {
-                log::info!("tearing down {:#?}", config.name());
-                virtual_address_action(
-                    AddressAction::Delete,
-                    &config.ip_addresses(),
-                    &config.interface_name(),
-                );
-                log::info!("{:#?} tear down complete", config.name());
-            }
-        }
+        let vrouter = config_to_vr(config);
+        routers_tasks.spawn(async { failover_vr::run(vrouter).await });
     }
 
     if routers_tasks.is_empty() {

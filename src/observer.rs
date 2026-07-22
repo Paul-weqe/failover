@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::NetError;
-use crate::general::{get_interface, virtual_address_action};
+use crate::general::{delete_mac_vlan, get_interface, virtual_address_action};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
 use crate::{AddressAction, NetResult};
@@ -34,7 +34,7 @@ impl EventObserver {
         mut vrouter: MutexGuard<'_, VirtualRouter>,
         event: Event,
     ) -> NetResult<()> {
-        let interface = get_interface(&vrouter.network_interface)?;
+        let interface = get_interface(&vrouter.mac_vlan_interface)?;
 
         match event {
             Event::Startup if vrouter.fsm.state == State::Init => {
@@ -46,7 +46,7 @@ impl EventObserver {
                     virtual_address_action(
                         AddressAction::Add,
                         &vrouter.str_ipv4_addresses(),
-                        &vrouter.network_interface,
+                        &vrouter.mac_vlan_interface,
                     );
                     let advert_time = vrouter.advert_interval as f32;
                     vrouter.fsm.set_advert_timer(advert_time);
@@ -60,7 +60,7 @@ impl EventObserver {
                     virtual_address_action(
                         AddressAction::Delete,
                         &vrouter.str_ipv4_addresses(),
-                        &vrouter.network_interface,
+                        &vrouter.mac_vlan_interface,
                     );
                     let m_down_interval = vrouter.master_down_interval;
                     vrouter.fsm.set_master_down_timer(m_down_interval);
@@ -80,10 +80,21 @@ impl EventObserver {
                     State::Master => {
                         vrouter.fsm.disable_timer();
                         vrouter.send_advertisement();
+                        virtual_address_action(
+                            AddressAction::Delete,
+                            &vrouter.str_ipv4_addresses(),
+                            &vrouter.mac_vlan_interface,
+                        );
                         vrouter.fsm.state = State::Init;
                     }
                     State::Init => {}
                 }
+                delete_mac_vlan(&vrouter.mac_vlan_interface);
+                log::info!(
+                    "({}) shut down, mac-vlan {} removed",
+                    vrouter.name,
+                    vrouter.mac_vlan_interface
+                );
             }
             Event::MasterDown if vrouter.fsm.state == State::Backup => {
                 // Send ADVERTIEMENT then send gratuitous ARP.
@@ -94,7 +105,7 @@ impl EventObserver {
                 virtual_address_action(
                     AddressAction::Add,
                     &vrouter.str_ipv4_addresses(),
-                    &vrouter.network_interface,
+                    &vrouter.mac_vlan_interface,
                 );
                 let advert_interval = vrouter.advert_interval as f32;
                 vrouter.fsm.set_advert_timer(advert_interval);

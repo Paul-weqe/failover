@@ -38,7 +38,7 @@ pub(crate) fn handle_incoming_arp_pkt(
             )));
         }
     };
-    let interface = get_interface(&vrouter.network_interface)?;
+    let interface = get_interface(&vrouter.mac_vlan_interface)?;
     let arp_packet = match ArpPacket::decode(eth_packet.payload()) {
         Some(arp_packet) => arp_packet,
         None => return Ok(()),
@@ -292,7 +292,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 virtual_address_action(
                     AddressAction::Add,
                     &vrouter.str_ipv4_addresses(),
-                    &vrouter.network_interface,
+                    &vrouter.mac_vlan_interface,
                 );
                 vrouter.fsm.state = State::Master;
                 let advert_interval = vrouter.advert_interval as f32;
@@ -323,7 +323,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 virtual_address_action(
                     AddressAction::Delete,
                     &vrouter.str_ipv4_addresses(),
-                    &vrouter.network_interface,
+                    &vrouter.mac_vlan_interface,
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
@@ -336,7 +336,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 virtual_address_action(
                     AddressAction::Delete,
                     &vrouter.str_ipv4_addresses(),
-                    &vrouter.network_interface,
+                    &vrouter.mac_vlan_interface,
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
