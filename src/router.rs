@@ -80,7 +80,6 @@ impl VirtualRouter {
             priority: self.priority,
             count_ip: self.ip_addresses.len() as u8,
             adver_int: self.advert_interval,
-            checksum: 0,
             ip_addresses: self.ipv4_addresses(),
         };
 

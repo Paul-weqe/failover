@@ -34,7 +34,6 @@ pub struct VrrpPacket {
     pub priority: u8,
     pub count_ip: u8,
     pub adver_int: u8,
-    pub checksum: u16,
     pub ip_addresses: Vec<Ipv4Addr>,
 }
 
@@ -110,7 +109,7 @@ impl VrrpPacket {
             return Err(PacketError::Malformed);
         }
 
-        let checksum = buf.get_u16();
+        let _checksum = buf.get_u16();
 
         let mut ip_addresses: Vec<Ipv4Addr> = vec![];
         for _ in 0..count_ip {
@@ -125,7 +124,6 @@ impl VrrpPacket {
             priority,
             count_ip,
             adver_int,
-            checksum,
             ip_addresses,
         })
     }
