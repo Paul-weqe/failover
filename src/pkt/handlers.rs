@@ -17,7 +17,7 @@ use pnet::packet::Packet;
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
 
-use crate::error::NetError;
+use crate::error::{NetworkError, PacketError};
 use crate::general::{get_interface, virtual_address_action};
 use crate::observer::EventObserver;
 use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
@@ -31,11 +31,9 @@ pub(crate) fn handle_incoming_arp_pkt(
 ) -> NetResult<()> {
     let vrouter = match vrouter.lock() {
         Ok(vr) => vr,
-        Err(err) => {
+        Err(_) => {
             log::error!("Unable to create mutex lock for vrouter");
-            return Err(NetError(format!(
-                "Unable to create mutex lock for vrouter\n\n {err}"
-            )));
+            return Err(NetworkError::LockPoisoned);
         }
     };
     let interface = get_interface(&vrouter.mac_vlan_interface)?;
@@ -85,7 +83,7 @@ pub(crate) fn handle_incoming_arp_pkt(
                 return Ok(());
             }
 
-            // MUST respond to ARP requests for the IP address(es) associated
+            // MUST respond to ARP requests for the IP address(s) associated
             // with the virtual router.
             for ip in &vrouter.ip_addresses {
                 if ip.addr().octets() == arp_packet.target_proto_address {
@@ -120,11 +118,25 @@ pub(crate) fn handle_incoming_arp_pkt(
     Ok(())
 }
 
+/// Logs why an incoming VRRP packet is being dropped
+fn log_drop(vrouter_name: &str, reason: PacketError) {
+    match reason {
+        PacketError::VridMismatch { .. } => {
+            log::trace!("({vrouter_name}) dropping VRRP packet: {reason}");
+        }
+        PacketError::BadTtl(_) | PacketError::BadChecksum => {
+            log::warn!("({vrouter_name}) dropping VRRP packet: {reason}");
+        }
+        _ => {
+            log::error!("({vrouter_name}) dropping VRRP packet: {reason}");
+        }
+    }
+}
+
 pub(crate) fn handle_incoming_vrrp_pkt(
     ip_packet: &Ipv4Packet<'_>,
     vrouter_mutex: Arc<Mutex<VirtualRouter>>,
 ) -> NetResult<()> {
-    let mut error: String;
     let mut vrouter = match vrouter_mutex.lock() {
         Ok(vr) => vr,
         Err(err) => {
@@ -135,9 +147,9 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     };
 
     let vrrp_packet = match VrrpPacket::decode(ip_packet.payload()) {
-        Some(pkt) => pkt,
-        None => {
-            log::warn!("Unable to read incoming VRRP packet");
+        Ok(pkt) => pkt,
+        Err(err) => {
+            log_drop(&vrouter.name, err);
             return Ok(());
         }
     };
@@ -155,13 +167,10 @@ pub(crate) fn handle_incoming_vrrp_pkt(
     // MUST DO verifications(rfc3768 section 7.1).
     {
         // 1. Verify IP TTL is 255.
-        if ip_packet.get_ttl() != 255 {
-            error = format!(
-                "({}) TTL of incoming VRRP packet != 255",
-                vrouter.name
-            );
-            log::warn!("{error}");
-            return Result::Err(NetError(error));
+        let ttl = ip_packet.get_ttl();
+        if ttl != 255 {
+            log_drop(&vrouter.name, PacketError::BadTtl(ttl));
+            return Ok(());
         }
 
         // 3. MUST verify that the received packet contains the complete VRRP
@@ -169,17 +178,11 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         //      Data)
 
         // 4. MUST verify the VRRP checksum.
-        // TODO: Make sure the checksum check is handled
-
         let mut check = Checksum::new();
         check.add_bytes(ip_packet.payload());
         if check.checksum() != [0, 0] {
-            error = format!(
-                "({}) Invalid checksum on incoming VRRP packet",
-                vrouter.name
-            );
-            log::warn!("{error}");
-            return Result::Err(NetError(error));
+            log_drop(&vrouter.name, PacketError::BadChecksum);
+            return Ok(());
         }
 
         // 5. MUST verify that the VRID is configured on the receiving interface
@@ -187,6 +190,13 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         //      255 (decimal)).
         //      TODO: Once implemented multiple interfaces
         if vrrp_packet.vrid != vrouter.vrid {
+            log_drop(
+                &vrouter.name,
+                PacketError::VridMismatch {
+                    expected: vrouter.vrid,
+                    received: vrrp_packet.vrid,
+                },
+            );
             return Ok(());
         }
 
@@ -199,13 +209,14 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         //      SHOULD log the event and MAY indicate via network management that a
         //      misconfiguration was detected.
         if vrrp_packet.adver_int != vrouter.advert_interval {
-            error = format!(
-                "({}) Incoming VRRP packet has advert interval {} while configured advert interval is {}",
-                vrouter.name, vrrp_packet.adver_int, vrouter.advert_interval
+            log_drop(
+                &vrouter.name,
+                PacketError::AdvertIntervalMismatch {
+                    expected: vrouter.advert_interval,
+                    received: vrrp_packet.adver_int,
+                },
             );
-
-            log::error!("{error}");
-            return Result::Err(NetError(error));
+            return Ok(());
         }
     }
 
@@ -223,7 +234,6 @@ pub(crate) fn handle_incoming_vrrp_pkt(
 
         let mut addr: Vec<u8> = vec![];
         for (counter, ip_ad) in vrrp_packet.ip_addresses.iter().enumerate() {
-            //addr.push(ip_ad.octets());
             ip_ad.octets().iter().for_each(|oc| {
                 addr.push(*oc);
             });
@@ -254,27 +264,21 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
 
         if !count_check {
-            error = format!(
-                "({}) ip count check({}) does not match with local configuration of ip count {}",
-                vrouter.name,
-                vrrp_packet.count_ip,
-                vrouter.ip_addresses.len()
+            log_drop(
+                &vrouter.name,
+                PacketError::IpCountMismatch {
+                    expected: vrouter.ip_addresses.len() as u8,
+                    received: vrrp_packet.count_ip,
+                },
             );
-            log::error!("{error}");
             if vrrp_packet.priority != 255 {
-                return Result::Err(NetError(error));
+                return Ok(());
             }
         }
 
         if !addr_check && vrrp_packet.priority != 255 {
-            error = format!(
-                "({}) IP addresses for incoming vrrp don't match ",
-                vrouter.name
-            );
-            log::error!("{error}");
-            if vrrp_packet.priority != 255 {
-                return Result::Err(NetError(error));
-            }
+            log_drop(&vrouter.name, PacketError::IpListMismatch);
+            return Ok(());
         }
     }
 

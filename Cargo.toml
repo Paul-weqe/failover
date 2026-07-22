@@ -29,6 +29,7 @@ netlink-packet-core = "0.8.1"
 netlink-packet-route = "0.31.0"
 rtnetlink = "0.21.0"
 futures-util = "0.3.32"
+thiserror = "2.0.19"
 
 [lib]
 doctest = false

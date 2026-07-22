@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use error::{NetError, OptError};
+use error::{FailoverError, NetworkError};
 use general::get_interface;
 use observer::EventObserver;
 use pnet::datalink::NetworkInterface;
@@ -11,6 +11,7 @@ use tokio::task::JoinSet;
 
 pub mod config;
 mod core_tasks;
+pub mod error;
 pub mod general;
 mod network;
 mod observer;
@@ -19,8 +20,8 @@ mod pkt;
 pub mod router;
 mod state_machine;
 
-pub type NetResult<T> = Result<T, NetError>;
-pub(crate) type OptResult<T> = Result<T, OptError>;
+pub(crate) type NetResult<T> = Result<T, NetworkError>;
+pub(crate) type ConfigResult<T> = Result<T, error::ConfigError>;
 
 #[derive(Clone)]
 pub(crate) struct TaskItems {
@@ -44,34 +45,9 @@ impl std::fmt::Display for AddressAction {
     }
 }
 
-pub mod error {
-    use std::error::Error;
-    use std::fmt::Display;
-
-    // Network errors
-    #[derive(Debug)]
-    pub struct NetError(pub String);
-    impl Error for NetError {}
-    impl Display for NetError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-
-    // Used for getting errors when parsing CLI arguments.
-    #[derive(Debug)]
-    pub struct OptError(pub String);
-    impl Error for OptError {}
-    impl Display for OptError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", self.0)
-        }
-    }
-}
-
 /// initiates the VRRP functions across the board.
 /// from interfaces, channels, packet handling etc...
-pub async fn run(mut vrouter: VirtualRouter) -> NetResult<()> {
+pub async fn run(mut vrouter: VirtualRouter) -> Result<(), FailoverError> {
     let parent_interface = get_interface(&vrouter.network_interface)?;
     vrouter.primary_ip = general::primary_ipv4(&parent_interface)?;
 
@@ -111,9 +87,8 @@ pub async fn run(mut vrouter: VirtualRouter) -> NetResult<()> {
     // listeners independently; tokio fans a single incoming signal out to
     // all of them, so each session cleans up only its own mac-vlan.
     let mut sigterm =
-        signal::unix::signal(signal::unix::SignalKind::terminate()).map_err(
-            |err| NetError(format!("Unable to install SIGTERM handler: {err}")),
-        )?;
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .map_err(NetworkError::SignalHandler)?;
 
     tokio::select! {
         _ = signal::ctrl_c() => {

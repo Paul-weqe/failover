@@ -3,6 +3,8 @@ use std::net::Ipv4Addr;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use internet_checksum::Checksum;
 
+use crate::error::PacketError;
+
 //
 // VRRP Packet Format.
 //
@@ -77,9 +79,11 @@ impl VrrpPacket {
         buf
     }
 
-    // TODO: Change this to a Result<Self> return.
-    pub fn decode(data: &[u8]) -> Option<Self> {
+    pub fn decode(data: &[u8]) -> Result<Self, PacketError> {
         let pkt_size = data.len();
+        if pkt_size < 1 {
+            return Err(PacketError::Malformed);
+        }
 
         let mut buf: Bytes = Bytes::copy_from_slice(data);
         let ver_type = buf.get_u8();
@@ -87,7 +91,11 @@ impl VrrpPacket {
         let _hdr_type = ver_type & 0x0F;
 
         if version != Self::VRRP_VERSION {
-            return None;
+            return Err(PacketError::UnsupportedVersion(version));
+        }
+
+        if !(Self::MIN_PKT_LENGTH..=Self::MAX_PKT_LENGTH).contains(&pkt_size) {
+            return Err(PacketError::Malformed);
         }
 
         let vrid = buf.get_u8();
@@ -96,11 +104,10 @@ impl VrrpPacket {
         let _auth_type = buf.get_u8();
         let adver_int = buf.get_u8();
 
-        if !(Self::MIN_PKT_LENGTH..=Self::MAX_PKT_LENGTH).contains(&pkt_size)
-            || count_ip as usize > Self::MAX_IP_COUNT
+        if count_ip as usize > Self::MAX_IP_COUNT
             || (count_ip * 4) + 16 != pkt_size as u8
         {
-            return None;
+            return Err(PacketError::Malformed);
         }
 
         let checksum = buf.get_u16();
@@ -113,7 +120,7 @@ impl VrrpPacket {
         let _auth_data = buf.get_u32();
         let _auth_data2 = buf.get_u32();
 
-        Some(Self {
+        Ok(Self {
             vrid,
             priority,
             count_ip,

@@ -6,6 +6,7 @@ use pnet::packet::ipv4::Ipv4Packet;
 use tokio::time;
 
 use crate::NetResult;
+use crate::error::NetworkError;
 use crate::network::{ArpListener, VrrpListener};
 use crate::observer::EventObserver;
 use crate::pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt};
@@ -14,11 +15,11 @@ use crate::state_machine::Event;
 /// Listens for VRRP advertisements on a raw IP socket bound to the VRRP
 /// multicast group and hands each one off to the VRRP packet handler.
 pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
-    let listener =
-        VrrpListener::bind(&items.parent_interface.name).map_err(|err| {
-            crate::error::NetError(format!(
-                "Unable to bind VRRP listening socket: {err}"
-            ))
+    let listener = VrrpListener::bind(&items.parent_interface.name)
+        .map_err(|source| NetworkError::SocketBind {
+            kind: "VRRP",
+            iface: items.parent_interface.name.clone(),
+            source,
         })?;
     let vrouter = items.vrouter;
 
@@ -51,10 +52,12 @@ pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
 /// Listens for ARP frames on a raw AF_PACKET socket bound to this
 /// interface and hands each one off to the ARP packet handler.
 pub(crate) async fn arp_process(items: crate::TaskItems) -> NetResult<()> {
-    let listener = ArpListener::bind(&items.interface.name).map_err(|err| {
-        crate::error::NetError(format!(
-            "Unable to bind ARP listening socket: {err}"
-        ))
+    let listener = ArpListener::bind(&items.interface.name).map_err(|source| {
+        NetworkError::SocketBind {
+            kind: "ARP",
+            iface: items.interface.name.clone(),
+            source,
+        }
     })?;
     let vrouter = items.vrouter;
 

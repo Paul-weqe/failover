@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::error::NetError;
+use crate::error::NetworkError;
 use crate::general::{delete_mac_vlan, get_interface, virtual_address_action};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
@@ -20,11 +20,7 @@ impl EventObserver {
     ) -> NetResult<()> {
         let vrouter = match vrouter.lock() {
             Ok(vrouter) => vrouter,
-            Err(_) => {
-                return Err(NetError(
-                    "Unable to fetch vrouter mutex".to_string(),
-                ));
-            }
+            Err(_) => return Err(NetworkError::LockPoisoned),
         };
         EventObserver::notify_mut(vrouter, event)?;
         Ok(())

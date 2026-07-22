@@ -12,8 +12,8 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use serde::{Deserialize, Serialize};
 
-use crate::OptResult;
-use crate::error::OptError;
+use crate::ConfigResult;
+use crate::error::{ConfigError, FailoverError};
 use crate::general::random_vr_name;
 
 const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
@@ -207,17 +207,19 @@ enum Mode {
     },
 }
 
-pub fn parse_cli_opts(args: CliArgs) -> OptResult<Vec<VrrpConfig>> {
-    load_mode(args.mode)
+pub fn parse_cli_opts(
+    args: CliArgs,
+) -> Result<Vec<VrrpConfig>, FailoverError> {
+    Ok(load_mode(args.mode)?)
 }
 
-fn load_mode(mode: Mode) -> OptResult<Vec<VrrpConfig>> {
+fn load_mode(mode: Mode) -> ConfigResult<Vec<VrrpConfig>> {
     match mode {
         Mode::FileMode {
             filename,
             log_file_path,
         } => {
-            configure_logging(log_file_path);
+            configure_logging(log_file_path)?;
             // Generate file path if none is given.
             let fpath = match filename {
                 None => {
@@ -237,35 +239,26 @@ fn load_mode(mode: Mode) -> OptResult<Vec<VrrpConfig>> {
                 let mut file = match File::create(&fpath) {
                     Ok(f) => f,
                     Err(_) => {
-                        let dir_path =
-                            match std::path::Path::new(&fpath).parent() {
-                                Some(dir) => dir,
-                                None => {
-                                    return Err(OptError(String::from(
-                                        "unable to find config path",
-                                    )));
-                                }
-                            };
+                        let dir_path = std::path::Path::new(&fpath)
+                            .parent()
+                            .ok_or_else(|| {
+                                ConfigError::NoParentDirectory(fpath.clone())
+                            })?;
                         let _ = create_dir_all(dir_path);
-                        File::create(&fpath).unwrap()
+                        File::create(&fpath).map_err(|source| {
+                            ConfigError::FileCreate {
+                                path: fpath.clone(),
+                                source,
+                            }
+                        })?
                     }
                 };
                 let _ = file.write_all(DEFAULT_JSON_CONFIG);
             }
 
             let mut configs: Vec<VrrpConfig> = vec![];
-            match read_json_config(&fpath) {
-                Ok(vec_config) => {
-                    for config_item in vec_config {
-                        configs.push(VrrpConfig::File(config_item));
-                    }
-                }
-                Err(_) => {
-                    return Result::Err(OptError(format!(
-                        "Problem parsing file {}",
-                        &fpath
-                    )));
-                }
+            for config_item in read_json_config(&fpath)? {
+                configs.push(VrrpConfig::File(config_item));
             }
             Ok(configs)
         }
@@ -279,7 +272,7 @@ fn load_mode(mode: Mode) -> OptResult<Vec<VrrpConfig>> {
             preempt_mode,
             log_file_path,
         } => {
-            configure_logging(log_file_path);
+            configure_logging(log_file_path)?;
             if name.is_none() {
                 name = Some(random_vr_name());
             }
@@ -298,7 +291,7 @@ fn load_mode(mode: Mode) -> OptResult<Vec<VrrpConfig>> {
     }
 }
 
-fn configure_logging(log_file_path: Option<String>) {
+fn configure_logging(log_file_path: Option<String>) -> ConfigResult<()> {
     let log_console_stderr = ConsoleAppender::builder().build();
     let mut log_builder = Config::builder().appender(
         Appender::builder().build("stderr", Box::new(log_console_stderr)),
@@ -308,7 +301,12 @@ fn configure_logging(log_file_path: Option<String>) {
     // set file path logging
     if let Some(file_path) = log_file_path {
         // Logging to log file.
-        let log_file = FileAppender::builder().build(file_path).unwrap();
+        let log_file = FileAppender::builder().build(&file_path).map_err(
+            |source| ConfigError::LogFileOpen {
+                path: file_path.clone(),
+                source,
+            },
+        )?;
         log_builder = log_builder
             .appender(Appender::builder().build("logfile", Box::new(log_file)));
         root_builder = root_builder.appender("logfile");
@@ -317,22 +315,20 @@ fn configure_logging(log_file_path: Option<String>) {
 
     let log_config = log_builder
         .build(root_builder.build(LevelFilter::Debug))
-        .unwrap();
+        .map_err(ConfigError::LoggingSetup)?;
     let _handler = log4rs::init_config(log_config);
+    Ok(())
 }
 
-fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
+fn read_json_config<P: AsRef<Path>>(path: P) -> ConfigResult<Vec<FileConfig>> {
     let path_str = path.as_ref().as_os_str();
+    let path_display = path.as_ref().display().to_string();
 
-    let file = match File::open(path_str) {
-        Ok(f) => f,
-        Err(_) => {
-            return Err(OptError(format!(
-                "unable to open file `{:?}`",
-                path.as_ref().as_os_str()
-            )));
-        }
-    };
+    let file =
+        File::open(path_str).map_err(|source| ConfigError::FileOpen {
+            path: path_display.clone(),
+            source,
+        })?;
 
     let reader = BufReader::new(file);
     let mut result: Vec<FileConfig> = Vec::new();
@@ -340,7 +336,7 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
     let list_file_configs: Vec<FileConfig> =
         match serde_json::from_reader(reader) {
             Ok(config) => config,
-            Err(_) => single_file_config(path_str)?,
+            Err(_) => single_file_config(path_str, &path_display)?,
         };
 
     for file_config in list_file_configs {
@@ -366,20 +362,24 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> OptResult<Vec<FileConfig>> {
     Ok(result)
 }
 
-fn single_file_config(path: &OsStr) -> OptResult<Vec<FileConfig>> {
-    // this single file config method is called only after
-    // the normal config fails, which it does after reading the file.
-    // thus unwrap()'ing here is safe.
-    let file = File::open(path).unwrap();
+fn single_file_config(
+    path: &OsStr,
+    path_display: &str,
+) -> ConfigResult<Vec<FileConfig>> {
+    // Called only after the file failed to parse as a config array; re-reads
+    // it as a single config object instead.
+    let file =
+        File::open(path).map_err(|source| ConfigError::FileOpen {
+            path: path_display.to_string(),
+            source,
+        })?;
 
     let reader = BufReader::new(file);
-    let _: FileConfig = match serde_json::from_reader(reader) {
-        Ok(config) => return Ok(vec![config]),
-        Err(_) => {
-            return Err(OptError(format!(
-                "Wrong config formatting in file {:?}",
-                path
-            )));
-        }
-    };
+    match serde_json::from_reader(reader) {
+        Ok(config) => Ok(vec![config]),
+        Err(source) => Err(ConfigError::Parse {
+            path: path_display.to_string(),
+            source,
+        }),
+    }
 }

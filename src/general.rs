@@ -12,7 +12,7 @@ use rtnetlink::packet_route::link::{
 use rtnetlink::{AddressMessageBuilder, LinkMacVlan, new_connection};
 
 use crate::config::VrrpConfig;
-use crate::error::NetError;
+use crate::error::NetworkError;
 use crate::packet::VrrpPacket;
 use crate::router::{VirtualRouter, VirtualRouterParams};
 use crate::{AddressAction, NetResult};
@@ -24,9 +24,7 @@ pub(crate) fn get_interface(name: &str) -> NetResult<NetworkInterface> {
     // check if interface name exists, if not create it
     match interfaces.into_iter().find(interface_names_match) {
         Some(interface) => Ok(interface),
-        None => Err(NetError(format!(
-            "unable to find interface with name {name}"
-        ))),
+        None => Err(NetworkError::InterfaceNotFound(name.to_string())),
     }
 }
 
@@ -42,12 +40,7 @@ pub(crate) fn primary_ipv4(
             IpAddr::V4(addr) => Some(addr),
             IpAddr::V6(_) => None,
         })
-        .ok_or_else(|| {
-            NetError(format!(
-                "Interface {} has no IPv4 address configured",
-                interface.name
-            ))
-        })
+        .ok_or_else(|| NetworkError::NoIpv4Address(interface.name.clone()))
 }
 
 // Takes the configs that have been received and converts them into a virtual
@@ -224,14 +217,8 @@ pub(crate) async fn create_mac_vlan(
 ) -> NetResult<String> {
     let name = mac_vlan_name(parent_ifname, vrid);
 
-    let (connection, handle, _) = match new_connection() {
-        Ok(conn) => conn,
-        Err(err) => {
-            return Err(NetError(format!(
-                "Unable to open netlink connection: {err}"
-            )));
-        }
-    };
+    let (connection, handle, _) =
+        new_connection().map_err(NetworkError::NetlinkConnect)?;
     tokio::spawn(connection);
 
     // Check if an interface with the name exists.
@@ -240,27 +227,21 @@ pub(crate) async fn create_mac_vlan(
     match existing.try_next().await {
         Ok(Some(link)) => {
             if !link_is_mac_vlan(&link) {
-                return Err(NetError(format!(
-                    "Interface {name} already exists and is not a mac-vlan; refusing to remove it"
-                )));
+                return Err(NetworkError::NotAMacVlan(name));
             }
             log::warn!(
                 "Removing stale mac-vlan {name} left over from a prior run"
             );
-            if let Err(err) =
+            if let Err(source) =
                 handle.link().del(link.header.index).execute().await
             {
-                return Err(NetError(format!(
-                    "Unable to remove stale mac-vlan {name}: {err}"
-                )));
+                return Err(NetworkError::StaleMacVlanRemoval { name, source });
             }
         }
         Ok(None) => {}
         Err(err) if is_no_such_device(&err) => {}
-        Err(err) => {
-            return Err(NetError(format!(
-                "Problem checking for existing interface {name}: {err}"
-            )));
+        Err(source) => {
+            return Err(NetworkError::InterfaceLookup { name, source });
         }
     }
 
@@ -272,14 +253,15 @@ pub(crate) async fn create_mac_vlan(
     let parent_index = match parents.try_next().await {
         Ok(Some(link)) => link.header.index,
         Ok(None) => {
-            return Err(NetError(format!(
-                "Unable to find parent interface {parent_ifname}"
-            )));
+            return Err(NetworkError::InterfaceNotFound(
+                parent_ifname.to_string(),
+            ));
         }
-        Err(err) => {
-            return Err(NetError(format!(
-                "Problem fetching parent interface {parent_ifname}: {err}"
-            )));
+        Err(source) => {
+            return Err(NetworkError::InterfaceLookup {
+                name: parent_ifname.to_string(),
+                source,
+            });
         }
     };
 
@@ -289,10 +271,8 @@ pub(crate) async fn create_mac_vlan(
         .address(virtual_mac)
         .build();
 
-    if let Err(err) = handle.link().add(message).execute().await {
-        return Err(NetError(format!(
-            "Unable to create mac-vlan interface {name}: {err}"
-        )));
+    if let Err(source) = handle.link().add(message).execute().await {
+        return Err(NetworkError::MacVlanCreate { name, source });
     }
 
     let arp_ignore_path = format!("/proc/sys/net/ipv4/conf/{name}/arp_ignore");
