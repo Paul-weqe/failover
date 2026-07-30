@@ -7,19 +7,24 @@ use tokio::time;
 
 use crate::NetResult;
 use crate::error::NetworkError;
-use crate::network::{ArpListener, VrrpListener};
+use crate::network::{ArpListener, NdpListener, VrrpListener, VrrpListenerV6};
 use crate::observer::EventObserver;
-use crate::pkt::handlers::{handle_incoming_arp_pkt, handle_incoming_vrrp_pkt};
+use crate::pkt::handlers::{
+    handle_incoming_arp_pkt, handle_incoming_ndp_pkt,
+    handle_incoming_vrrp_v4_pkt, handle_incoming_vrrp_v6_pkt,
+};
 use crate::state_machine::Event;
 
 /// Listens for VRRP advertisements on a raw IP socket bound to the VRRP
 /// multicast group and hands each one off to the VRRP packet handler.
 pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
-    let listener = VrrpListener::bind(&items.parent_interface.name)
-        .map_err(|source| NetworkError::SocketBind {
-            kind: "VRRP",
-            iface: items.parent_interface.name.clone(),
-            source,
+    let listener =
+        VrrpListener::bind(&items.parent_interface.name).map_err(|source| {
+            NetworkError::SocketBind {
+                kind: "VRRP",
+                iface: items.parent_interface.name.clone(),
+                source,
+            }
         })?;
     let vrouter = items.vrouter;
 
@@ -41,9 +46,45 @@ pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
         };
 
         if let Err(err) =
-            handle_incoming_vrrp_pkt(&ip_packet, Arc::clone(&vrouter))
+            handle_incoming_vrrp_v4_pkt(&ip_packet, Arc::clone(&vrouter))
         {
             log::warn!("problem handling incoming VRRP packet");
+            log::warn!("{err}");
+        }
+    }
+}
+
+/// IPv6 counterpart of `vrrp_process`. Only ever spawned for a v3 instance
+/// (see `TaskItems::interface_v6`); returns immediately if there's no v6
+/// mac-vlan to listen on.
+pub(crate) async fn vrrp_process_v6(items: crate::TaskItems) -> NetResult<()> {
+    let Some(interface_v6) = items.interface_v6.clone() else {
+        return Ok(());
+    };
+
+    let listener = VrrpListenerV6::bind(&items.parent_interface.name).map_err(
+        |source| NetworkError::SocketBind {
+            kind: "VRRPv6",
+            iface: items.parent_interface.name.clone(),
+            source,
+        },
+    )?;
+    let vrouter = items.vrouter;
+    let _ = interface_v6;
+
+    loop {
+        let (payload, src) = match listener.recv().await {
+            Ok(pair) => pair,
+            Err(err) => {
+                log::warn!("Error receiving VRRPv6 packet: {err}");
+                continue;
+            }
+        };
+
+        if let Err(err) =
+            handle_incoming_vrrp_v6_pkt(&payload, src, Arc::clone(&vrouter))
+        {
+            log::warn!("problem handling incoming VRRPv6 packet");
             log::warn!("{err}");
         }
     }
@@ -52,13 +93,14 @@ pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
 /// Listens for ARP frames on a raw AF_PACKET socket bound to this
 /// interface and hands each one off to the ARP packet handler.
 pub(crate) async fn arp_process(items: crate::TaskItems) -> NetResult<()> {
-    let listener = ArpListener::bind(&items.interface.name).map_err(|source| {
-        NetworkError::SocketBind {
-            kind: "ARP",
-            iface: items.interface.name.clone(),
-            source,
-        }
-    })?;
+    let listener =
+        ArpListener::bind(&items.interface.name).map_err(|source| {
+            NetworkError::SocketBind {
+                kind: "ARP",
+                iface: items.interface.name.clone(),
+                source,
+            }
+        })?;
     let vrouter = items.vrouter;
 
     loop {
@@ -79,6 +121,41 @@ pub(crate) async fn arp_process(items: crate::TaskItems) -> NetResult<()> {
             handle_incoming_arp_pkt(&eth_packet, Arc::clone(&vrouter))
         {
             log::error!("problem handling incoming ARP packet");
+            log::error!("{err}");
+        }
+    }
+}
+
+/// IPv6's equivalent of `arp_process`: listens for Neighbor
+/// Solicitation/Advertisement traffic on the v6 mac-vlan. Only ever
+/// spawned for a v3 instance.
+pub(crate) async fn ndp_process(items: crate::TaskItems) -> NetResult<()> {
+    let Some(interface_v6) = items.interface_v6.clone() else {
+        return Ok(());
+    };
+
+    let listener = NdpListener::bind(&interface_v6.name).map_err(|source| {
+        NetworkError::SocketBind {
+            kind: "NDP",
+            iface: interface_v6.name.clone(),
+            source,
+        }
+    })?;
+    let vrouter = items.vrouter;
+
+    loop {
+        let (payload, src) = match listener.recv().await {
+            Ok(pair) => pair,
+            Err(err) => {
+                log::warn!("Error receiving NDP packet: {err}");
+                continue;
+            }
+        };
+
+        if let Err(err) =
+            handle_incoming_ndp_pkt(&payload, src, Arc::clone(&vrouter))
+        {
+            log::error!("problem handling incoming NDP packet");
             log::error!("{err}");
         }
     }

@@ -1,17 +1,15 @@
 /// Defines how each different type of packet should be handled.
 /// Depending on the current state of the machine.
-/// The two main packets being anticipated are:
-///     - VRRP packets
-///     - ARP packets
+/// The packets anticipated are:
+///     - VRRP packets (IPv4 and, for v3, IPv6)
+///     - ARP packets (IPv4's neighbor resolution)
+///     - NDP packets (IPv6's neighbor resolution, ARP has no v6 equivalent)
 ///
-/// The actions on each of the above are specified in section
-/// 6 of RFC 3768.
-use core::f32;
-use std::net::Ipv4Addr;
+/// The actions on each of the above are specified in section 6 of RFC 3768
+/// (v2) and section 6 of RFC 5798 (v3).
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 
-use internet_checksum::Checksum;
-use ipnet::Ipv4Net;
 use pnet::datalink;
 use pnet::packet::Packet;
 use pnet::packet::ethernet::EthernetPacket;
@@ -20,7 +18,10 @@ use pnet::packet::ipv4::Ipv4Packet;
 use crate::error::{NetworkError, PacketError};
 use crate::general::{get_interface, virtual_address_action};
 use crate::observer::EventObserver;
-use crate::packet::{ARPframe, ArpPacket, EthernetFrame, VrrpPacket};
+use crate::packet::{
+    ARPframe, ArpPacket, EthernetFrame, NdpNeighborAdvertisement,
+    NdpNeighborSolicitation, VrrpAddresses, VrrpPacket, VRRP_V6_MCAST_ADDR,
+};
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
 use crate::{AddressAction, NetResult, network};
@@ -36,7 +37,7 @@ pub(crate) fn handle_incoming_arp_pkt(
             return Err(NetworkError::LockPoisoned);
         }
     };
-    let interface = get_interface(&vrouter.mac_vlan_interface)?;
+    let interface = get_interface(&vrouter.mac_vlan_interface_v4)?;
     let arp_packet = match ArpPacket::decode(eth_packet.payload()) {
         Some(arp_packet) => arp_packet,
         None => return Ok(()),
@@ -58,7 +59,7 @@ pub(crate) fn handle_incoming_arp_pkt(
         State::Backup => {
             // MUST NOT respond to ARP requests for the IP address(s) associated
             // with the virtual router.
-            for ip in &vrouter.ip_addresses {
+            for ip in &vrouter.ipv4_addresses {
                 if ip.addr().octets() == arp_packet.target_proto_address {
                     return Ok(());
                 }
@@ -85,7 +86,7 @@ pub(crate) fn handle_incoming_arp_pkt(
 
             // MUST respond to ARP requests for the IP address(s) associated
             // with the virtual router.
-            for ip in &vrouter.ip_addresses {
+            for ip in &vrouter.ipv4_addresses {
                 if ip.addr().octets() == arp_packet.target_proto_address {
                     let eth_frame = EthernetFrame {
                         dst_mac: eth_packet.get_source().octets(),
@@ -118,6 +119,61 @@ pub(crate) fn handle_incoming_arp_pkt(
     Ok(())
 }
 
+/// IPv6's equivalent of `handle_incoming_arp_pkt`: only ever called for a
+/// v3 instance's Neighbor Solicitation traffic on its `fover6-...`
+/// mac-vlan. Only handles the MASTER-replies-to-solicitations case --
+/// unlike ARP, IPv6 raw sockets don't hand us a full link-layer frame to
+/// mirror the BACKUP-side "don't respond"/"discard for our own mac"
+/// bookkeeping against, so this is intentionally the minimal behaviour
+/// needed for failover to still work: announce ownership when asked.
+pub(crate) fn handle_incoming_ndp_pkt(
+    payload: &[u8],
+    _src_ip: Ipv6Addr,
+    vrouter: Arc<Mutex<VirtualRouter>>,
+) -> NetResult<()> {
+    let vrouter = match vrouter.lock() {
+        Ok(vr) => vr,
+        Err(_) => {
+            log::error!("Unable to create mutex lock for vrouter");
+            return Err(NetworkError::LockPoisoned);
+        }
+    };
+
+    let Some(v6_iface) = vrouter.mac_vlan_interface_v6.clone() else {
+        return Ok(());
+    };
+
+    if vrouter.fsm.state != State::Master {
+        return Ok(());
+    }
+
+    let Some(ns) = NdpNeighborSolicitation::decode(payload) else {
+        return Ok(());
+    };
+
+    if !vrouter
+        .ipv6_addresses
+        .iter()
+        .any(|ip| ip.addr() == ns.target_address)
+    {
+        return Ok(());
+    }
+
+    let interface = get_interface(&v6_iface)?;
+    let Some(interface_mac) = interface.mac else {
+        return Ok(());
+    };
+
+    let na = NdpNeighborAdvertisement {
+        target_address: ns.target_address,
+        target_link_addr: interface_mac.octets(),
+        override_flag: true,
+    };
+    network::send_neighbor_advertisement(&v6_iface, ns.target_address, na);
+
+    Ok(())
+}
+
 /// Logs why an incoming VRRP packet is being dropped
 fn log_drop(vrouter_name: &str, reason: PacketError) {
     match reason {
@@ -133,8 +189,58 @@ fn log_drop(vrouter_name: &str, reason: PacketError) {
     }
 }
 
-pub(crate) fn handle_incoming_vrrp_pkt(
+pub(crate) fn handle_incoming_vrrp_v4_pkt(
     ip_packet: &Ipv4Packet<'_>,
+    vrouter_mutex: Arc<Mutex<VirtualRouter>>,
+) -> NetResult<()> {
+    for interface in datalink::interfaces().iter() {
+        if interface
+            .ips
+            .iter()
+            .any(|ip| ip.ip() == ip_packet.get_source())
+        {
+            return Ok(());
+        }
+    }
+
+    process_vrrp_packet(
+        ip_packet.payload(),
+        IpAddr::V4(ip_packet.get_source()),
+        IpAddr::V4(ip_packet.get_destination()),
+        ip_packet.get_ttl(),
+        vrouter_mutex,
+    )
+}
+
+/// IPv6 counterpart of `handle_incoming_vrrp_v4_pkt`. `payload` is already
+/// just the VRRP message (an IPv6 raw socket doesn't hand us the IP
+/// header the way an IPv4 one does), so there's no header to strip and no
+/// hop-limit to check here -- see `network::VrrpListenerV6` for why.
+pub(crate) fn handle_incoming_vrrp_v6_pkt(
+    payload: &[u8],
+    src_ip: Ipv6Addr,
+    vrouter_mutex: Arc<Mutex<VirtualRouter>>,
+) -> NetResult<()> {
+    for interface in datalink::interfaces().iter() {
+        if interface.ips.iter().any(|ip| ip.ip() == IpAddr::V6(src_ip)) {
+            return Ok(());
+        }
+    }
+
+    process_vrrp_packet(
+        payload,
+        IpAddr::V6(src_ip),
+        IpAddr::V6(VRRP_V6_MCAST_ADDR),
+        255,
+        vrouter_mutex,
+    )
+}
+
+fn process_vrrp_packet(
+    payload: &[u8],
+    src_ip: IpAddr,
+    dst_ip: IpAddr,
+    ttl: u8,
     vrouter_mutex: Arc<Mutex<VirtualRouter>>,
 ) -> NetResult<()> {
     let mut vrouter = match vrouter_mutex.lock() {
@@ -146,7 +252,7 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
     };
 
-    let vrrp_packet = match VrrpPacket::decode(ip_packet.payload()) {
+    let vrrp_packet = match VrrpPacket::decode(payload, src_ip, dst_ip) {
         Ok(pkt) => pkt,
         Err(err) => {
             log_drop(&vrouter.name, err);
@@ -154,41 +260,21 @@ pub(crate) fn handle_incoming_vrrp_pkt(
         }
     };
 
-    for interface in datalink::interfaces().iter() {
-        if interface
-            .ips
-            .iter()
-            .any(|ip| ip.ip() == ip_packet.get_source())
-        {
-            return Ok(());
-        }
-    }
-
-    // MUST DO verifications(rfc3768 section 7.1).
+    // MUST DO verifications(rfc3768 section 7.1 / rfc5798 section 5.2.x).
     {
-        // 1. Verify IP TTL is 255.
-        let ttl = ip_packet.get_ttl();
+        // 1. Verify IP TTL/hop-limit is 255.
         if ttl != 255 {
             log_drop(&vrouter.name, PacketError::BadTtl(ttl));
             return Ok(());
         }
 
-        // 3. MUST verify that the received packet contains the complete VRRP
-        //      packet (including fixed fields, IP Address(es), and Authentication
-        //      Data)
+        // The VRRP checksum is now verified inside `VrrpPacket::decode`
+        // itself (it needs the IPv6 pseudo-header for a v6 packet, which
+        // only the caller has), so a bad checksum already surfaced as a
+        // decode error above.
 
-        // 4. MUST verify the VRRP checksum.
-        let mut check = Checksum::new();
-        check.add_bytes(ip_packet.payload());
-        if check.checksum() != [0, 0] {
-            log_drop(&vrouter.name, PacketError::BadChecksum);
-            return Ok(());
-        }
-
-        // 5. MUST verify that the VRID is configured on the receiving interface
-        //      and the local router is not the IP Address owner (Priority equals
-        //      255 (decimal)).
-        //      TODO: Once implemented multiple interfaces
+        // 5. MUST verify that the VRID is configured on the receiving
+        //      interface and the local router is not the IP Address owner.
         if vrrp_packet.vrid != vrouter.vrid {
             log_drop(
                 &vrouter.name,
@@ -200,87 +286,76 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             return Ok(());
         }
 
-        // 6. Auth Type must be same.
-        //      TODO: once multiple authentication types are configured
-
         // 7. MUST verify that the Adver Interval in the packet is the same as
-        //      the locally configured for this virtual router
-        //      If the above check fails, the receiver MUST discard the packet,
-        //      SHOULD log the event and MAY indicate via network management that a
-        //      misconfiguration was detected.
-        if vrrp_packet.adver_int != vrouter.advert_interval {
+        //      the locally configured for this virtual router.
+        let expected_adver_int_cs = vrouter.advert_interval as u16 * 100;
+        if vrrp_packet.adver_int_cs != expected_adver_int_cs {
             log_drop(
                 &vrouter.name,
                 PacketError::AdvertIntervalMismatch {
                     expected: vrouter.advert_interval,
-                    received: vrrp_packet.adver_int,
+                    received: (vrrp_packet.adver_int_cs / 100) as u8,
                 },
             );
             return Ok(());
         }
     }
 
-    // MAY DO verifications (rfc3768 section 7.1)
+    // MAY DO verifications (rfc3768 section 7.1): count and address list
+    // must match what's locally configured *for this packet's family*.
+    let (count_check, addr_check, expected_count) = match &vrrp_packet.addresses
     {
-        // 1. MAY verify that "Count IP Addrs" and the list of IP Address
-        //      matches the IP_Addresses configured for the VRID
-        //
-        //      If the packet was not generated by the address owner (Priority does
-        //      not equal 255 (decimal)), the receiver MUST drop the packet,
-        //      otherwise continue processing.
-        let count_check =
-            vrrp_packet.count_ip == vrouter.ip_addresses.len() as u8;
-        let mut addr_check = true;
-
-        let mut addr: Vec<u8> = vec![];
-        for (counter, ip_ad) in vrrp_packet.ip_addresses.iter().enumerate() {
-            ip_ad.octets().iter().for_each(|oc| {
-                addr.push(*oc);
-            });
-            if (counter + 1) % 4 == 0 {
-                let ip = match Ipv4Net::new(
-                    Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]),
-                    24,
-                ) {
-                    Ok(ip) => ip.addr(),
-                    Err(err) => {
-                        log::error!(
-                            "Invalid IP on incoming VRRP packet: {:?}",
-                            addr
-                        );
-                        log::error!("{err}");
-                        return Ok(());
-                    }
-                };
-                if !vrouter.ipv4_addresses().contains(&ip) {
-                    log::error!(
-                        "({}) IP address {:?} for incoming VRRP packet not found in local config",
-                        vrouter.name,
-                        ip
-                    );
-                    addr_check = false;
-                }
-            }
+        VrrpAddresses::V4(addrs) => {
+            let local = vrouter.ipv4_addrs();
+            (
+                addrs.len() == vrouter.ipv4_addresses.len(),
+                addrs.iter().all(|a| local.contains(a)),
+                vrouter.ipv4_addresses.len() as u8,
+            )
         }
-
-        if !count_check {
-            log_drop(
-                &vrouter.name,
-                PacketError::IpCountMismatch {
-                    expected: vrouter.ip_addresses.len() as u8,
-                    received: vrrp_packet.count_ip,
-                },
-            );
-            if vrrp_packet.priority != 255 {
-                return Ok(());
-            }
+        VrrpAddresses::V6(addrs) => {
+            let local = vrouter.ipv6_addrs();
+            (
+                addrs.len() == vrouter.ipv6_addresses.len(),
+                addrs.iter().all(|a| local.contains(a)),
+                vrouter.ipv6_addresses.len() as u8,
+            )
         }
+    };
 
-        if !addr_check && vrrp_packet.priority != 255 {
-            log_drop(&vrouter.name, PacketError::IpListMismatch);
+    if !count_check {
+        log_drop(
+            &vrouter.name,
+            PacketError::IpCountMismatch {
+                expected: expected_count,
+                received: vrrp_packet.addresses.len() as u8,
+            },
+        );
+        if vrrp_packet.priority != 255 {
             return Ok(());
         }
     }
+
+    if !addr_check && vrrp_packet.priority != 255 {
+        log_drop(&vrouter.name, PacketError::IpListMismatch);
+        return Ok(());
+    }
+
+    // Which mac-vlan/address list this packet's family maps to, for the
+    // state-transition actions below.
+    let (mac_vlan_iface, str_addresses) = match &vrrp_packet.addresses {
+        VrrpAddresses::V4(_) => (
+            vrouter.mac_vlan_interface_v4.clone(),
+            vrouter.str_ipv4_addresses(),
+        ),
+        VrrpAddresses::V6(_) => match &vrouter.mac_vlan_interface_v6 {
+            Some(iface) => (iface.clone(), vrouter.str_ipv6_addresses()),
+            // A v2 instance has no v6 side, so it should never have
+            // reached this branch (only the v6 listener decodes V6
+            // addresses, and only a v3 instance runs one).
+            None => return Ok(()),
+        },
+    };
 
     match vrouter.fsm.state {
         State::Backup => {
@@ -295,8 +370,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(
             } else if vrouter.priority > vrrp_packet.priority {
                 virtual_address_action(
                     AddressAction::Add,
-                    &vrouter.str_ipv4_addresses(),
-                    &vrouter.mac_vlan_interface,
+                    &str_addresses,
+                    &mac_vlan_iface,
                 );
                 vrouter.fsm.state = State::Master;
                 let advert_interval = vrouter.advert_interval as f32;
@@ -311,8 +386,6 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 vrrp_packet.priority > vrouter.priority;
             let adv_priority_eq_local_priority =
                 vrrp_packet.priority == vrouter.priority;
-            let _send_ip_gt_local_ip =
-                ip_packet.get_source() > ip_packet.get_destination();
 
             // If an ADVERTISEMENT is received, then
             if vrrp_packet.priority == 0 {
@@ -326,8 +399,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 // delete virtual IP address
                 virtual_address_action(
                     AddressAction::Delete,
-                    &vrouter.str_ipv4_addresses(),
-                    &vrouter.mac_vlan_interface,
+                    &str_addresses,
+                    &mac_vlan_iface,
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);
@@ -339,8 +412,8 @@ pub(crate) fn handle_incoming_vrrp_pkt(
                 // delete virtual IP address
                 virtual_address_action(
                     AddressAction::Delete,
-                    &vrouter.str_ipv4_addresses(),
-                    &vrouter.mac_vlan_interface,
+                    &str_addresses,
+                    &mac_vlan_iface,
                 );
                 let m_down_interval = vrouter.master_down_interval;
                 vrouter.fsm.set_master_down_timer(m_down_interval);

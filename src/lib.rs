@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use error::{FailoverError, NetworkError};
-use general::get_interface;
+use general::AddressFamily;
 use observer::EventObserver;
+use packet::VrrpVersion;
 use pnet::datalink::NetworkInterface;
 use router::VirtualRouter;
 use state_machine::Event;
@@ -27,6 +28,7 @@ pub(crate) type ConfigResult<T> = Result<T, error::ConfigError>;
 pub(crate) struct TaskItems {
     vrouter: Arc<Mutex<VirtualRouter>>,
     interface: NetworkInterface,
+    interface_v6: Option<NetworkInterface>,
     parent_interface: NetworkInterface,
 }
 
@@ -48,16 +50,35 @@ impl std::fmt::Display for AddressAction {
 /// initiates the VRRP functions across the board.
 /// from interfaces, channels, packet handling etc...
 pub async fn run(mut vrouter: VirtualRouter) -> Result<(), FailoverError> {
-    let parent_interface = get_interface(&vrouter.network_interface)?;
+    let parent_interface = general::get_interface(&vrouter.network_interface)?;
     vrouter.primary_ip = general::primary_ipv4(&parent_interface)?;
 
-    vrouter.mac_vlan_interface =
-        general::create_mac_vlan(&parent_interface.name, vrouter.vrid).await?;
-    let interface = get_interface(&vrouter.mac_vlan_interface)?;
+    vrouter.mac_vlan_interface_v4 = general::create_mac_vlan(
+        &parent_interface.name,
+        vrouter.vrid,
+        AddressFamily::V4,
+    )
+    .await?;
+    let interface = general::get_interface(&vrouter.mac_vlan_interface_v4)?;
+
+    let interface_v6 = if vrouter.version == VrrpVersion::V3 {
+        let v6_name = general::create_mac_vlan(
+            &parent_interface.name,
+            vrouter.vrid,
+            AddressFamily::V6,
+        )
+        .await?;
+        vrouter.mac_vlan_interface_v6 = Some(v6_name.clone());
+        vrouter.primary_ip_v6 = general::primary_ipv6(&parent_interface);
+        Some(general::get_interface(&v6_name)?)
+    } else {
+        None
+    };
 
     let items = TaskItems {
         vrouter: Arc::new(Mutex::new(vrouter)),
         interface,
+        interface_v6,
         parent_interface,
     };
 
@@ -77,6 +98,17 @@ pub async fn run(mut vrouter: VirtualRouter) -> Result<(), FailoverError> {
     // Listens for incoming ARP requests/replies.
     let arp_items = items.clone();
     tasks_set.spawn(async { core_tasks::arp_process(arp_items).await });
+
+    // v3 additionally listens for VRRP-over-IPv6 and NDP traffic on its
+    // own mac-vlan.
+    if items.interface_v6.is_some() {
+        let vrrp_v6_items = items.clone();
+        tasks_set
+            .spawn(async { core_tasks::vrrp_process_v6(vrrp_v6_items).await });
+
+        let ndp_items = items.clone();
+        tasks_set.spawn(async { core_tasks::ndp_process(ndp_items).await });
+    }
 
     let timer_items = items.clone();
     tasks_set.spawn(async { core_tasks::timer_process(timer_items).await });

@@ -3,8 +3,10 @@ use std::ffi::OsStr;
 use std::fs::{File, create_dir_all};
 use std::io::{BufReader, Write};
 use std::path::Path;
+use std::str::FromStr;
 
 use clap::Parser;
+use ipnet::IpNet;
 use log::LevelFilter;
 use log4rs::Config;
 use log4rs::append::console::ConsoleAppender;
@@ -15,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::ConfigResult;
 use crate::error::{ConfigError, FailoverError};
 use crate::general::random_vr_name;
+use crate::packet::VrrpVersion;
 
 const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 {
@@ -55,6 +58,8 @@ pub struct FileConfig {
     pub advert_interval: u8,
     #[serde(default = "default_preempt_mode")]
     pub preempt_mode: bool,
+    #[serde(default)]
+    pub version: VrrpVersion,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +72,7 @@ pub struct CliConfig {
     pub priority: u8,
     pub advert_interval: u8,
     pub preempt_mode: bool,
+    pub version: VrrpVersion,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +136,13 @@ impl VrrpConfig {
         match self {
             VrrpConfig::File(config) => config.preempt_mode,
             VrrpConfig::Cli(config) => config.preempt_mode,
+        }
+    }
+
+    pub fn version(&self) -> VrrpVersion {
+        match self {
+            VrrpConfig::File(config) => config.version,
+            VrrpConfig::Cli(config) => config.version,
         }
     }
 }
@@ -199,6 +212,13 @@ enum Mode {
         preempt_mode: bool,
 
         #[arg(
+            long = "vrrp-version",
+            default_value = "3",
+            help = "VRRP protocol version to run for this instance: 2 or 3. Defaults to 3."
+        )]
+        vrrp_version: u8,
+
+        #[arg(
             long,
             default_value = None,
             help = "Path log file you want to use"
@@ -207,9 +227,7 @@ enum Mode {
     },
 }
 
-pub fn parse_cli_opts(
-    args: CliArgs,
-) -> Result<Vec<VrrpConfig>, FailoverError> {
+pub fn parse_cli_opts(args: CliArgs) -> Result<Vec<VrrpConfig>, FailoverError> {
     Ok(load_mode(args.mode)?)
 }
 
@@ -260,6 +278,7 @@ fn load_mode(mode: Mode) -> ConfigResult<Vec<VrrpConfig>> {
             for config_item in read_json_config(&fpath)? {
                 configs.push(VrrpConfig::File(config_item));
             }
+            validate_configs(&configs)?;
             Ok(configs)
         }
         Mode::CliMode {
@@ -270,12 +289,15 @@ fn load_mode(mode: Mode) -> ConfigResult<Vec<VrrpConfig>> {
             priority,
             advert_interval,
             preempt_mode,
+            vrrp_version,
             log_file_path,
         } => {
             configure_logging(log_file_path)?;
             if name.is_none() {
                 name = Some(random_vr_name());
             }
+            let version = VrrpVersion::try_from(vrrp_version)
+                .map_err(|_| ConfigError::InvalidVersion(vrrp_version))?;
 
             let config = CliConfig {
                 name,
@@ -285,10 +307,62 @@ fn load_mode(mode: Mode) -> ConfigResult<Vec<VrrpConfig>> {
                 priority,
                 advert_interval,
                 preempt_mode,
+                version,
             };
-            Ok(vec![VrrpConfig::Cli(config)])
+            let configs = vec![VrrpConfig::Cli(config)];
+            validate_configs(&configs)?;
+            Ok(configs)
         }
     }
+}
+
+/// Cross-instance and per-instance checks that deserialization alone can't
+/// express: name/vrid uniqueness per version, no IPv6 on v2, and
+/// advert_interval capped at 40s for v3 (12-bit centisecond wire field).
+fn validate_configs(configs: &[VrrpConfig]) -> ConfigResult<()> {
+    for (i, cfg) in configs.iter().enumerate() {
+        let version = cfg.version();
+
+        if version == VrrpVersion::V3 {
+            let interval = cfg.advert_interval();
+            if interval > 40 {
+                return Err(ConfigError::AdvertIntervalTooLarge {
+                    name: cfg.name(),
+                    interval,
+                });
+            }
+        }
+
+        if version == VrrpVersion::V2 {
+            for addr in cfg.ip_addresses() {
+                if matches!(IpNet::from_str(&addr), Ok(IpNet::V6(_))) {
+                    return Err(ConfigError::Ipv6NotSupportedInV2 {
+                        name: cfg.name(),
+                        address: addr,
+                    });
+                }
+            }
+        }
+
+        for other in configs.iter().skip(i + 1) {
+            if other.version() != version {
+                continue;
+            }
+            if other.name() == cfg.name() {
+                return Err(ConfigError::DuplicateName {
+                    name: cfg.name(),
+                    version: version.as_u8(),
+                });
+            }
+            if other.vrid() == cfg.vrid() {
+                return Err(ConfigError::DuplicateVrid {
+                    vrid: cfg.vrid(),
+                    version: version.as_u8(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn configure_logging(log_file_path: Option<String>) -> ConfigResult<()> {
@@ -301,12 +375,13 @@ fn configure_logging(log_file_path: Option<String>) -> ConfigResult<()> {
     // set file path logging
     if let Some(file_path) = log_file_path {
         // Logging to log file.
-        let log_file = FileAppender::builder().build(&file_path).map_err(
-            |source| ConfigError::LogFileOpen {
-                path: file_path.clone(),
-                source,
-            },
-        )?;
+        let log_file =
+            FileAppender::builder()
+                .build(&file_path)
+                .map_err(|source| ConfigError::LogFileOpen {
+                    path: file_path.clone(),
+                    source,
+                })?;
         log_builder = log_builder
             .appender(Appender::builder().build("logfile", Box::new(log_file)));
         root_builder = root_builder.appender("logfile");
@@ -331,7 +406,6 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> ConfigResult<Vec<FileConfig>> {
         })?;
 
     let reader = BufReader::new(file);
-    let mut result: Vec<FileConfig> = Vec::new();
 
     let list_file_configs: Vec<FileConfig> =
         match serde_json::from_reader(reader) {
@@ -339,27 +413,7 @@ fn read_json_config<P: AsRef<Path>>(path: P) -> ConfigResult<Vec<FileConfig>> {
             Err(_) => single_file_config(path_str, &path_display)?,
         };
 
-    for file_config in list_file_configs {
-        // check if the name of Virtual Router being entered is unique
-        if let Some(_con) = result
-            .iter()
-            .find(|r: &&FileConfig| r.name == file_config.name)
-        {
-            continue;
-        };
-
-        // check if VRID of the Virtual Router being entered is unique
-        if let Some(_con) = result
-            .iter()
-            .find(|r: &&FileConfig| r.vrid == file_config.vrid)
-        {
-            continue;
-        };
-
-        result.push(file_config);
-    }
-
-    Ok(result)
+    Ok(list_file_configs)
 }
 
 fn single_file_config(
@@ -368,11 +422,10 @@ fn single_file_config(
 ) -> ConfigResult<Vec<FileConfig>> {
     // Called only after the file failed to parse as a config array; re-reads
     // it as a single config object instead.
-    let file =
-        File::open(path).map_err(|source| ConfigError::FileOpen {
-            path: path_display.to_string(),
-            source,
-        })?;
+    let file = File::open(path).map_err(|source| ConfigError::FileOpen {
+        path: path_display.to_string(),
+        source,
+    })?;
 
     let reader = BufReader::new(file);
     match serde_json::from_reader(reader) {
@@ -381,5 +434,120 @@ fn single_file_config(
             path: path_display.to_string(),
             source,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(name: &str, vrid: u8, version: VrrpVersion) -> VrrpConfig {
+        VrrpConfig::File(FileConfig {
+            vrid,
+            ip_addresses: vec!["192.168.100.10/24".to_string()],
+            interface_name: "eth0".to_string(),
+            name: name.to_string(),
+            priority: 100,
+            advert_interval: 1,
+            preempt_mode: true,
+            version,
+        })
+    }
+
+    #[test]
+    fn version_defaults_to_v3_when_omitted() {
+        let json = r#"{
+            "vrid": 51,
+            "ip_addresses": ["192.168.100.10/24"],
+            "interface_name": "eth0"
+        }"#;
+        let cfg: FileConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.version, VrrpVersion::V3);
+    }
+
+    #[test]
+    fn version_rejects_values_other_than_2_or_3() {
+        let json = r#"{
+            "vrid": 51,
+            "ip_addresses": ["192.168.100.10/24"],
+            "interface_name": "eth0",
+            "version": 4
+        }"#;
+        assert!(serde_json::from_str::<FileConfig>(json).is_err());
+    }
+
+    #[test]
+    fn same_name_and_vrid_allowed_across_different_versions() {
+        let configs = vec![
+            sample("VR_1", 51, VrrpVersion::V2),
+            sample("VR_1", 51, VrrpVersion::V3),
+        ];
+        assert!(validate_configs(&configs).is_ok());
+    }
+
+    #[test]
+    fn duplicate_name_same_version_is_a_hard_error() {
+        let configs = vec![
+            sample("VR_1", 51, VrrpVersion::V3),
+            sample("VR_1", 52, VrrpVersion::V3),
+        ];
+        assert!(matches!(
+            validate_configs(&configs),
+            Err(ConfigError::DuplicateName { .. })
+        ));
+    }
+
+    #[test]
+    fn duplicate_vrid_same_version_is_a_hard_error() {
+        let configs = vec![
+            sample("VR_1", 51, VrrpVersion::V3),
+            sample("VR_2", 51, VrrpVersion::V3),
+        ];
+        assert!(matches!(
+            validate_configs(&configs),
+            Err(ConfigError::DuplicateVrid { .. })
+        ));
+    }
+
+    #[test]
+    fn ipv6_address_on_v2_instance_is_rejected() {
+        let mut cfg = sample("VR_1", 51, VrrpVersion::V2);
+        if let VrrpConfig::File(file_cfg) = &mut cfg {
+            file_cfg.ip_addresses.push("fd00::1/64".to_string());
+        }
+        assert!(matches!(
+            validate_configs(&[cfg]),
+            Err(ConfigError::Ipv6NotSupportedInV2 { .. })
+        ));
+    }
+
+    #[test]
+    fn ipv6_address_on_v3_instance_is_allowed() {
+        let mut cfg = sample("VR_1", 51, VrrpVersion::V3);
+        if let VrrpConfig::File(file_cfg) = &mut cfg {
+            file_cfg.ip_addresses.push("fd00::1/64".to_string());
+        }
+        assert!(validate_configs(&[cfg]).is_ok());
+    }
+
+    #[test]
+    fn advert_interval_over_40s_rejected_for_v3() {
+        let mut cfg = sample("VR_1", 51, VrrpVersion::V3);
+        if let VrrpConfig::File(file_cfg) = &mut cfg {
+            file_cfg.advert_interval = 41;
+        }
+        assert!(matches!(
+            validate_configs(&[cfg]),
+            Err(ConfigError::AdvertIntervalTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn advert_interval_over_40s_allowed_for_v2() {
+        let mut cfg = sample("VR_1", 51, VrrpVersion::V2);
+        if let VrrpConfig::File(file_cfg) = &mut cfg {
+            file_cfg.advert_interval = 200;
+        }
+        assert!(validate_configs(&[cfg]).is_ok());
     }
 }

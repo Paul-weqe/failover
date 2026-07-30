@@ -52,6 +52,31 @@ pub enum ConfigError {
 
     #[error("unable to initialize logging: {0}")]
     LoggingSetup(#[source] log4rs::config::runtime::ConfigErrors),
+
+    #[error(
+        "VRRP version {0} is invalid for instance; must be 2 or 3"
+    )]
+    InvalidVersion(u8),
+
+    #[error(
+        "duplicate Virtual Router name {name:?} for VRRPv{version}; names must be unique per version (rename one of the two, or give them different \"version\" values)"
+    )]
+    DuplicateName { name: String, version: u8 },
+
+    #[error(
+        "duplicate VRID {vrid} for VRRPv{version}; vrid must be unique per version (pick a different vrid, or give them different \"version\" values)"
+    )]
+    DuplicateVrid { vrid: u8, version: u8 },
+
+    #[error(
+        "({name}) advertisement interval {interval}s exceeds the maximum VRRPv3 can encode (40s); lower advert_interval or run this instance as v2"
+    )]
+    AdvertIntervalTooLarge { name: String, interval: u8 },
+
+    #[error(
+        "({name}) VRRPv2 only supports IPv4, but IPv6 address {address:?} was configured; remove it or set \"version\": 3"
+    )]
+    Ipv6NotSupportedInV2 { name: String, address: String },
 }
 
 #[derive(Debug, Error)]
@@ -73,9 +98,14 @@ pub enum NetworkError {
     },
 
     #[error(
-        "interface {0} already exists and is not a mac-vlan; refusing to remove it"
+        "interface {0} already exists and is not a mac-vlan; refusing to touch it"
     )]
-    NotAMacVlan(String),
+    NotMacVlan(String),
+
+    #[error(
+        "mac-vlan {name} already exists but {reason}; refusing to reuse it"
+    )]
+    MacVlanMismatch { name: String, reason: String },
 
     #[error("unable to remove stale mac-vlan {name}: {source}")]
     StaleMacVlanRemoval {
