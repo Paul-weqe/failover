@@ -70,3 +70,52 @@ pub(crate) enum Event {
     Shutdown,
     MasterDown,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_advert_timer_sets_type_and_duration() {
+        let mut fsm = VirtualRouterMachine::default();
+        fsm.set_advert_timer(1.5);
+
+        assert_eq!(fsm.timer.t_type, TimerType::Adver);
+        assert_eq!(fsm.timer.remaining_time, 1.5);
+        assert!(fsm.timer.waiting_for.is_some());
+        assert!(fsm.timer.waiting_for.unwrap() > Instant::now());
+    }
+
+    #[test]
+    fn set_master_down_timer_sets_type_and_duration() {
+        let mut fsm = VirtualRouterMachine::default();
+        fsm.set_master_down_timer(3.5);
+
+        assert_eq!(fsm.timer.t_type, TimerType::MasterDown);
+        assert_eq!(fsm.timer.remaining_time, 3.5);
+        assert!(fsm.timer.waiting_for.is_some());
+        assert!(fsm.timer.waiting_for.unwrap() > Instant::now());
+    }
+
+    #[test]
+    fn disable_timer_clears_type_duration_and_deadline() {
+        let mut fsm = VirtualRouterMachine::default();
+        fsm.set_advert_timer(1.0);
+
+        fsm.disable_timer();
+
+        assert_eq!(fsm.timer.t_type, TimerType::Null);
+        assert_eq!(fsm.timer.remaining_time, 0.0);
+        assert!(fsm.timer.waiting_for.is_none());
+    }
+
+    #[test]
+    fn setting_a_new_timer_overwrites_the_previous_one() {
+        let mut fsm = VirtualRouterMachine::default();
+        fsm.set_master_down_timer(3.0);
+        fsm.set_advert_timer(1.0);
+
+        assert_eq!(fsm.timer.t_type, TimerType::Adver);
+        assert_eq!(fsm.timer.remaining_time, 1.0);
+    }
+}

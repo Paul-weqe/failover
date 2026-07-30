@@ -338,3 +338,64 @@ pub(crate) fn random_vr_name() -> String {
     log::info!("Name for Virtual Router not given. generated name VR_{val}");
     format!("VR_{val}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use netlink_packet_core::ErrorMessage;
+    use std::num::NonZeroI32;
+
+    // Golden values below pin down the current hash/naming scheme. If this
+    // test starts failing after an intentional change to `fnv1a_hash` or
+    // `mac_vlan_name`, remember that upgrades won't find the mac-vlan
+    // interface a prior run created under the old name -- that's the actual
+    // failure mode being guarded against, not just this assertion.
+    #[test]
+    fn fnv1a_hash_is_stable_for_known_inputs() {
+        assert_eq!(fnv1a_hash(""), 0x811c_9dc5);
+        assert_eq!(fnv1a_hash("eth0"), 0x67b1_9724);
+    }
+
+    #[test]
+    fn fnv1a_hash_differs_for_different_inputs() {
+        assert_ne!(fnv1a_hash("eth0"), fnv1a_hash("eth1"));
+    }
+
+    #[test]
+    fn mac_vlan_name_is_stable_and_deterministic() {
+        let first = mac_vlan_name("eth0", 51);
+        let second = mac_vlan_name("eth0", 51);
+        assert_eq!(first, second);
+        assert_eq!(first, "fover-51-19724");
+    }
+
+    #[test]
+    fn mac_vlan_name_varies_with_vrid_and_parent() {
+        assert_ne!(mac_vlan_name("eth0", 51), mac_vlan_name("eth0", 52));
+        assert_ne!(mac_vlan_name("eth0", 51), mac_vlan_name("eth1", 51));
+    }
+
+    fn netlink_error_with_code(code: i32) -> rtnetlink::Error {
+        let mut msg = ErrorMessage::default();
+        msg.code = NonZeroI32::new(code);
+        rtnetlink::Error::NetlinkError(msg)
+    }
+
+    #[test]
+    fn is_no_such_device_true_for_enodev() {
+        let err = netlink_error_with_code(-libc::ENODEV);
+        assert!(is_no_such_device(&err));
+    }
+
+    #[test]
+    fn is_no_such_device_false_for_other_codes() {
+        let err = netlink_error_with_code(-libc::EPERM);
+        assert!(!is_no_such_device(&err));
+    }
+
+    #[test]
+    fn is_no_such_device_false_for_non_netlink_errors() {
+        let err = rtnetlink::Error::RequestFailed;
+        assert!(!is_no_such_device(&err));
+    }
+}

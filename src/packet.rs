@@ -221,3 +221,143 @@ impl ArpPacket {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_packet(count_ip: u8) -> VrrpPacket {
+        let ip_addresses = (0..count_ip)
+            .map(|i| Ipv4Addr::new(192, 168, 100, i))
+            .collect();
+        VrrpPacket {
+            vrid: 51,
+            priority: 100,
+            count_ip,
+            adver_int: 1,
+            ip_addresses,
+        }
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_various_ip_counts() {
+        for count in [0u8, 1, 2, VrrpPacket::MAX_IP_COUNT as u8] {
+            let pkt = sample_packet(count);
+            let encoded = pkt.encode();
+            let decoded = VrrpPacket::decode(&encoded).unwrap_or_else(|err| {
+                panic!("decode failed for count_ip={count}: {err}")
+            });
+
+            assert_eq!(decoded.vrid, pkt.vrid);
+            assert_eq!(decoded.priority, pkt.priority);
+            assert_eq!(decoded.count_ip, pkt.count_ip);
+            assert_eq!(decoded.adver_int, pkt.adver_int);
+            assert_eq!(decoded.ip_addresses, pkt.ip_addresses);
+        }
+    }
+
+    #[test]
+    fn encode_produces_a_valid_internet_checksum() {
+        let encoded = sample_packet(2).encode();
+        let mut check = Checksum::new();
+        check.add_bytes(&encoded);
+        assert_eq!(check.checksum(), [0, 0]);
+    }
+
+    #[test]
+    fn decode_rejects_empty_buffer() {
+        assert!(matches!(
+            VrrpPacket::decode(&[]),
+            Err(PacketError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_buffer_shorter_than_min_length() {
+        let encoded = sample_packet(0).encode();
+        assert_eq!(encoded.len(), VrrpPacket::MIN_PKT_LENGTH);
+        let truncated = &encoded[..encoded.len() - 1];
+        assert!(matches!(
+            VrrpPacket::decode(truncated),
+            Err(PacketError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_buffer_longer_than_max_length() {
+        let encoded = sample_packet(VrrpPacket::MAX_IP_COUNT as u8).encode();
+        assert_eq!(encoded.len(), VrrpPacket::MAX_PKT_LENGTH);
+        let mut padded = encoded.to_vec();
+        padded.push(0);
+        assert!(matches!(
+            VrrpPacket::decode(&padded),
+            Err(PacketError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_unsupported_version() {
+        let mut encoded = sample_packet(1).encode();
+        // High nibble is version; swap 2 -> 3.
+        encoded[0] = (3 << 4) | (encoded[0] & 0x0F);
+        assert!(matches!(
+            VrrpPacket::decode(&encoded),
+            Err(PacketError::UnsupportedVersion(3))
+        ));
+    }
+
+    #[test]
+    fn decode_rejects_count_ip_disagreeing_with_length() {
+        let mut encoded = sample_packet(1).encode();
+        // Byte 3 is count_ip; claim 2 addresses while the buffer only
+        // carries the bytes for 1, so the length formula no longer holds.
+        encoded[3] = 2;
+        assert!(matches!(
+            VrrpPacket::decode(&encoded),
+            Err(PacketError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn arp_decode_rejects_wrong_length() {
+        assert!(ArpPacket::decode(&[0u8; 27]).is_none());
+        assert!(ArpPacket::decode(&[0u8; 29]).is_none());
+    }
+
+    #[test]
+    fn arp_decode_roundtrips_known_fields() {
+        let pkt = ArpPacket {
+            hw_type: 1,
+            proto_type: 0x0800,
+            hw_length: 6,
+            proto_length: 4,
+            operation: 2,
+            sender_hw_address: [0x00, 0x00, 0x5e, 0x00, 0x01, 0x33],
+            sender_proto_address: [192, 168, 100, 1],
+            target_hw_address: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+            target_proto_address: [192, 168, 100, 254],
+        };
+
+        let mut buf = BytesMut::with_capacity(28);
+        buf.put_u16(pkt.hw_type);
+        buf.put_u16(pkt.proto_type);
+        buf.put_u8(pkt.hw_length);
+        buf.put_u8(pkt.proto_length);
+        buf.put_u16(pkt.operation);
+        buf.put_slice(&pkt.sender_hw_address);
+        buf.put_slice(&pkt.sender_proto_address);
+        buf.put_slice(&pkt.target_hw_address);
+        buf.put_slice(&pkt.target_proto_address);
+
+        let decoded = ArpPacket::decode(&buf).expect("valid 28-byte frame");
+        assert_eq!(decoded.hw_type, pkt.hw_type);
+        assert_eq!(decoded.proto_type, pkt.proto_type);
+        assert_eq!(decoded.hw_length, pkt.hw_length);
+        assert_eq!(decoded.proto_length, pkt.proto_length);
+        assert_eq!(decoded.operation, pkt.operation);
+        assert_eq!(decoded.sender_hw_address, pkt.sender_hw_address);
+        assert_eq!(decoded.sender_proto_address, pkt.sender_proto_address);
+        assert_eq!(decoded.target_hw_address, pkt.target_hw_address);
+        assert_eq!(decoded.target_proto_address, pkt.target_proto_address);
+    }
+}
