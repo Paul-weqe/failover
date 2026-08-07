@@ -2,12 +2,11 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use ipnet::{Ipv4Net, Ipv6Net};
 
-use crate::network;
 use crate::packet::{
-    ARPframe, ArpPacket, EthernetFrame, NdpNeighborAdvertisement, VrrpAddresses,
-    VrrpPacket, VrrpVersion,
+    ARPframe, ArpPacket, EthernetFrame, NdpNeighborAdvertisement, VrrpPacket,
 };
 use crate::state_machine::VirtualRouterMachine;
+use crate::{VrrpAddresses, VrrpVersion, network};
 
 #[derive(Debug, Clone)]
 pub struct VirtualRouter {
@@ -69,8 +68,7 @@ impl VirtualRouter {
             // resolution. This is a real formula change, not just a unit
             // relabeling -- do not collapse this back into the v2 arm.
             VrrpVersion::V3 => {
-                ((256_f32 - priority as f32) * advert_interval as f32)
-                    / 256_f32
+                ((256_f32 - priority as f32) * advert_interval as f32) / 256_f32
             }
         };
         let master_down_interval: f32 =

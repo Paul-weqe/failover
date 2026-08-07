@@ -14,10 +14,9 @@ use log4rs::append::file::FileAppender;
 use log4rs::config::{Appender, Root};
 use serde::{Deserialize, Serialize};
 
-use crate::ConfigResult;
 use crate::error::{ConfigError, FailoverError};
 use crate::general::random_vr_name;
-use crate::packet::VrrpVersion;
+use crate::{ConfigResult, VrrpVersion};
 
 const DEFAULT_JSON_CONFIG: &[u8; 201] = b"
 {

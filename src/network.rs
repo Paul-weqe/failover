@@ -11,8 +11,8 @@ use socket2::{
 use tokio::io::unix::AsyncFd;
 
 use crate::packet::{
-    ARPframe, ALL_NODES_V6_MCAST_ADDR, NdpNeighborAdvertisement, VrrpPacket,
-    VRRP_V6_MCAST_ADDR,
+    ALL_NODES_V6_MCAST_ADDR, ARPframe, NdpNeighborAdvertisement,
+    VRRP_V6_MCAST_ADDR, VrrpPacket,
 };
 
 // IANA-assigned IP protocol numbers.
@@ -165,81 +165,43 @@ pub fn send_neighbor_advertisement(
     let buf = na.encode(target_addr, dst);
     let saddr = SocketAddrV6::new(dst, 0, 0, 0);
     if let Err(err) = sock.send_to(&buf, &saddr.into()) {
-        log::warn!("Problem sending NDP neighbor advertisement on {ifname}: {err}");
+        log::warn!(
+            "Problem sending NDP neighbor advertisement on {ifname}: {err}"
+        );
     }
 }
 
-/// A raw IPv4 socket bound to `ifname`, listening on the VRRP protocol
-/// (112) as a member of the VRRP multicast group (224.0.0.18). Used
-/// instead of a promiscuous datalink capture so that we only ever hear
-/// about VRRP traffic actually addressed to the group, and can await it
-/// asynchronously without blocking a tokio worker thread.
 pub(crate) struct VrrpListener {
     inner: AsyncFd<Socket>,
 }
 
 impl VrrpListener {
-    pub(crate) fn bind(ifname: &str) -> io::Result<Self> {
+    pub(crate) fn bind(ifname: &str, addr: IpAddr) -> io::Result<Self> {
+        let (domain, mcast_addr) = match addr {
+            IpAddr::V4(_) => (Domain::IPV4, IpAddr::V4(VRRP_MCAST_ADDR)),
+            IpAddr::V6(_) => (Domain::IPV6, IpAddr::V6(VRRP_V6_MCAST_ADDR)),
+        };
+
         let sock = Socket::new(
-            Domain::IPV4,
+            domain,
             Type::RAW,
             Some(Protocol::from(VRRP_PROTOCOL_NUMBER)),
         )?;
-        sock.bind_device(Some(ifname.as_bytes()))?;
+        sock.bind_device(Some(ifname.as_bytes()));
 
         let ifindex = if_index(ifname)?;
-        sock.join_multicast_v4_n(
-            &VRRP_MCAST_ADDR,
-            &InterfaceIndexOrAddress::Index(ifindex),
-        )?;
 
-        sock.set_nonblocking(true)?;
-        Ok(Self {
-            inner: AsyncFd::new(sock)?,
-        })
-    }
-
-    /// Waits for and returns the next VRRP IP datagram received on this
-    /// socket, IP header included (an IPv4 raw socket's receive path
-    /// includes the IP header, unlike IPv6's).
-    pub(crate) async fn recv(&self) -> io::Result<Vec<u8>> {
-        loop {
-            let mut guard = self.inner.readable().await?;
-            let mut buf = [MaybeUninit::<u8>::uninit(); 512];
-            match guard.try_io(|inner| inner.get_ref().recv(&mut buf)) {
-                Ok(Ok(n)) => {
-                    let data = unsafe {
-                        std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), n)
-                    };
-                    return Ok(data.to_vec());
-                }
-                Ok(Err(err)) => return Err(err),
-                Err(_would_block) => continue,
+        match mcast_addr {
+            IpAddr::V4(addr) => {
+                sock.join_multicast_v4_n(
+                    &addr,
+                    &InterfaceIndexOrAddress::Index(ifindex),
+                )?;
+            }
+            IpAddr::V6(addr) => {
+                sock.join_multicast_v6(&addr, ifindex)?;
             }
         }
-    }
-}
-
-/// IPv6 counterpart of [`VrrpListener`]. Unlike an IPv4 raw socket, an
-/// IPv6 raw socket's receive path does *not* include the IP header, so
-/// `recv` here returns the VRRP payload directly along with the sender's
-/// address (recovered from the socket's peer address, since it isn't in
-/// the payload).
-pub(crate) struct VrrpListenerV6 {
-    inner: AsyncFd<Socket>,
-}
-
-impl VrrpListenerV6 {
-    pub(crate) fn bind(ifname: &str) -> io::Result<Self> {
-        let sock = Socket::new(
-            Domain::IPV6,
-            Type::RAW,
-            Some(Protocol::from(VRRP_PROTOCOL_NUMBER)),
-        )?;
-        sock.bind_device(Some(ifname.as_bytes()))?;
-
-        let ifindex = if_index(ifname)?;
-        sock.join_multicast_v6(&VRRP_V6_MCAST_ADDR, ifindex)?;
 
         sock.set_nonblocking(true)?;
         Ok(Self {
@@ -247,16 +209,17 @@ impl VrrpListenerV6 {
         })
     }
 
-    pub(crate) async fn recv(&self) -> io::Result<(Vec<u8>, Ipv6Addr)> {
+    pub(crate) async fn recv(
+        &self,
+        unspec_addr: IpAddr,
+    ) -> io::Result<(Vec<u8>, IpAddr)> {
         loop {
             let mut guard = self.inner.readable().await?;
             let mut buf = [MaybeUninit::<u8>::uninit(); 512];
             match guard.try_io(|inner| inner.get_ref().recv_from(&mut buf)) {
                 Ok(Ok((n, addr))) => {
-                    let src = addr
-                        .as_socket_ipv6()
-                        .map(|s| *s.ip())
-                        .unwrap_or(Ipv6Addr::UNSPECIFIED);
+                    let src =
+                        addr.as_socket().map(|s| s.ip()).unwrap_or(unspec_addr);
                     let data = unsafe {
                         std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), n)
                     };

@@ -2,10 +2,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use internet_checksum::Checksum;
-use serde::de::Deserializer;
-use serde::{Deserialize, Serialize, Serializer};
 
 use crate::error::PacketError;
+use crate::{VrrpAddresses, VrrpVersion};
 
 // IANA-assigned IP protocol numbers used when building pseudo-headers for
 // checksums that must cover them (IPv6 VRRP, and ICMPv6/NDP).
@@ -16,83 +15,6 @@ pub(crate) const VRRP_V6_MCAST_ADDR: Ipv6Addr =
     Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x12);
 pub(crate) const ALL_NODES_V6_MCAST_ADDR: Ipv6Addr =
     Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum VrrpVersion {
-    V2 = 2,
-    // VRRPv3 is the default when a config doesn't specify a version.
-    #[default]
-    V3 = 3,
-}
-
-impl VrrpVersion {
-    pub const fn as_u8(self) -> u8 {
-        match self {
-            VrrpVersion::V2 => 2,
-            VrrpVersion::V3 => 3,
-        }
-    }
-}
-
-impl std::fmt::Display for VrrpVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_u8())
-    }
-}
-
-impl TryFrom<u8> for VrrpVersion {
-    type Error = PacketError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            2 => Ok(VrrpVersion::V2),
-            3 => Ok(VrrpVersion::V3),
-            other => Err(PacketError::UnsupportedVersion(other)),
-        }
-    }
-}
-
-impl Serialize for VrrpVersion {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u8(self.as_u8())
-    }
-}
-
-impl<'de> Deserialize<'de> for VrrpVersion {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = u8::deserialize(deserializer)?;
-        VrrpVersion::try_from(value).map_err(|_| {
-            serde::de::Error::custom(format!(
-                "invalid VRRP version {value}; must be 2 or 3"
-            ))
-        })
-    }
-}
-
-/// A packet's IP address list, tagged by address family. A single
-/// `VrrpPacket` always carries addresses of one family -- a dual-stack v3
-/// instance sends two separate packets (one per family) rather than mixing
-/// them in one.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VrrpAddresses {
-    V4(Vec<Ipv4Addr>),
-    V6(Vec<Ipv6Addr>),
-}
-
-impl VrrpAddresses {
-    pub fn len(&self) -> usize {
-        match self {
-            VrrpAddresses::V4(addrs) => addrs.len(),
-            VrrpAddresses::V6(addrs) => addrs.len(),
-        }
-    }
-}
 
 //
 // VRRPv2 packet format (RFC 3768) over IPv4:
@@ -118,9 +40,6 @@ pub struct VrrpPacket {
     pub version: VrrpVersion,
     pub vrid: u8,
     pub priority: u8,
-    /// Advertisement interval, always in centiseconds regardless of wire
-    /// version -- v2's wire field is whole seconds (so this is always a
-    /// multiple of 100 for a v2 packet), v3's is centiseconds natively.
     pub adver_int_cs: u16,
     pub addresses: VrrpAddresses,
 }

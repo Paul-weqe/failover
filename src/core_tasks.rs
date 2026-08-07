@@ -1,3 +1,4 @@
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -7,7 +8,7 @@ use tokio::time;
 
 use crate::NetResult;
 use crate::error::NetworkError;
-use crate::network::{ArpListener, NdpListener, VrrpListener, VrrpListenerV6};
+use crate::network::{ArpListener, NdpListener, VrrpListener};
 use crate::observer::EventObserver;
 use crate::pkt::handlers::{
     handle_incoming_arp_pkt, handle_incoming_ndp_pkt,
@@ -18,18 +19,20 @@ use crate::state_machine::Event;
 /// Listens for VRRP advertisements on a raw IP socket bound to the VRRP
 /// multicast group and hands each one off to the VRRP packet handler.
 pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
+    let unspec_addr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     let listener =
-        VrrpListener::bind(&items.parent_interface.name).map_err(|source| {
-            NetworkError::SocketBind {
-                kind: "VRRP",
+        VrrpListener::bind(&items.parent_interface.name, unspec_addr).map_err(
+            |source| NetworkError::SocketBind {
+                kind: "socket4",
                 iface: items.parent_interface.name.clone(),
                 source,
-            }
-        })?;
+            },
+        )?;
+
     let vrouter = items.vrouter;
 
     loop {
-        let buf = match listener.recv().await {
+        let (buf, src) = match listener.recv(unspec_addr).await {
             Ok(buf) => buf,
             Err(err) => {
                 log::warn!("Error receiving VRRP packet: {err}");
@@ -62,18 +65,21 @@ pub(crate) async fn vrrp_process_v6(items: crate::TaskItems) -> NetResult<()> {
         return Ok(());
     };
 
-    let listener = VrrpListenerV6::bind(&items.parent_interface.name).map_err(
-        |source| NetworkError::SocketBind {
-            kind: "VRRPv6",
-            iface: items.parent_interface.name.clone(),
-            source,
-        },
-    )?;
+    let unspec_addr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+    let listener =
+        VrrpListener::bind(&items.parent_interface.name, unspec_addr).map_err(
+            |source| NetworkError::SocketBind {
+                kind: "socket6",
+                iface: items.parent_interface.name.clone(),
+                source,
+            },
+        )?;
+
     let vrouter = items.vrouter;
     let _ = interface_v6;
 
     loop {
-        let (payload, src) = match listener.recv().await {
+        let (buf, src) = match listener.recv(unspec_addr).await {
             Ok(pair) => pair,
             Err(err) => {
                 log::warn!("Error receiving VRRPv6 packet: {err}");
@@ -81,8 +87,9 @@ pub(crate) async fn vrrp_process_v6(items: crate::TaskItems) -> NetResult<()> {
             }
         };
 
-        if let Err(err) =
-            handle_incoming_vrrp_v6_pkt(&payload, src, Arc::clone(&vrouter))
+        if let IpAddr::V6(src) = src
+            && let Err(err) =
+                handle_incoming_vrrp_v6_pkt(&buf, src, Arc::clone(&vrouter))
         {
             log::warn!("problem handling incoming VRRPv6 packet");
             log::warn!("{err}");

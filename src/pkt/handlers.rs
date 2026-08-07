@@ -20,11 +20,11 @@ use crate::general::{get_interface, virtual_address_action};
 use crate::observer::EventObserver;
 use crate::packet::{
     ARPframe, ArpPacket, EthernetFrame, NdpNeighborAdvertisement,
-    NdpNeighborSolicitation, VrrpAddresses, VrrpPacket, VRRP_V6_MCAST_ADDR,
+    NdpNeighborSolicitation, VRRP_V6_MCAST_ADDR, VrrpPacket,
 };
 use crate::router::VirtualRouter;
 use crate::state_machine::{Event, State};
-use crate::{AddressAction, NetResult, network};
+use crate::{AddressAction, NetResult, VrrpAddresses, network};
 
 pub(crate) fn handle_incoming_arp_pkt(
     eth_packet: &EthernetPacket<'_>,

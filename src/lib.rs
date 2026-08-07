@@ -1,11 +1,12 @@
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 
 use error::{FailoverError, NetworkError};
 use general::AddressFamily;
 use observer::EventObserver;
-use packet::VrrpVersion;
 use pnet::datalink::NetworkInterface;
 use router::VirtualRouter;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use state_machine::Event;
 use tokio::signal;
 use tokio::task::JoinSet;
@@ -21,6 +22,82 @@ mod pkt;
 pub mod router;
 mod state_machine;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum VrrpVersion {
+    V2 = 2,
+    #[default]
+    V3 = 3,
+}
+
+// ==== impl VrrpVersion ====
+
+impl VrrpVersion {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            VrrpVersion::V2 => 2,
+            VrrpVersion::V3 => 3,
+        }
+    }
+}
+
+impl std::fmt::Display for VrrpVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VRRP v{}", self.as_u8())
+    }
+}
+
+impl TryFrom<u8> for VrrpVersion {
+    type Error = error::PacketError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            2 => Ok(VrrpVersion::V2),
+            3 => Ok(VrrpVersion::V3),
+            other => Err(error::PacketError::UnsupportedVersion(other)),
+        }
+    }
+}
+
+impl Serialize for VrrpVersion {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.as_u8())
+    }
+}
+
+impl<'de> Deserialize<'de> for VrrpVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u8::deserialize(deserializer)?;
+        VrrpVersion::try_from(value).map_err(|_| {
+            serde::de::Error::custom(format!(
+                "invalid VRRP version {value}; must be 2 or 3"
+            ))
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum VrrpAddresses {
+    V4(Vec<Ipv4Addr>),
+    V6(Vec<Ipv6Addr>),
+}
+
+// ==== impl VrrpAddresses ====
+
+impl VrrpAddresses {
+    pub fn len(&self) -> usize {
+        match self {
+            VrrpAddresses::V4(addrs) => addrs.len(),
+            VrrpAddresses::V6(addrs) => addrs.len(),
+        }
+    }
+}
+
 pub(crate) type NetResult<T> = Result<T, NetworkError>;
 pub(crate) type ConfigResult<T> = Result<T, error::ConfigError>;
 
@@ -33,7 +110,7 @@ pub(crate) struct TaskItems {
 }
 
 #[derive(Debug)]
-pub enum AddressAction {
+pub(crate) enum AddressAction {
     Add,
     Delete,
 }

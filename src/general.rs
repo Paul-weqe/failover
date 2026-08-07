@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use futures_util::stream::TryStreamExt;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+use netlink_packet_route::address::AddressAttribute;
 use pnet::datalink::{self, NetworkInterface};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
@@ -455,9 +456,20 @@ async fn remaining_address_count(
         .set_link_index_filter(link_index)
         .execute();
     let mut count = 0usize;
-    while addrs.try_next().await?.is_some() {
-        count += 1;
+
+    'link_local: while let Some(msg) = addrs.try_next().await? {
+        for attr in msg.attributes {
+            if let AddressAttribute::Address(addr) = attr {
+                if let IpAddr::V6(addr) = addr
+                    && addr.is_unicast_link_local()
+                {
+                    continue 'link_local;
+                }
+                count += 1;
+            }
+        }
     }
+
     Ok(count)
 }
 
