@@ -12,7 +12,7 @@ use rtnetlink::packet_route::link::{
 };
 use rtnetlink::{AddressMessageBuilder, Handle, LinkMacVlan, new_connection};
 
-use crate::config::VrrpConfig;
+use crate::config::Config;
 use crate::error::NetworkError;
 use crate::packet::VrrpPacket;
 use crate::router::{VirtualRouter, VirtualRouterParams};
@@ -56,13 +56,13 @@ pub(crate) fn primary_ipv6(interface: &NetworkInterface) -> Option<Ipv6Addr> {
 
 /// Takes the configs that have been received and converts them into a virtual
 ///  router instance.
-pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
+pub fn config_to_vr(conf: Config) -> VirtualRouter {
     let max_ip_count = VrrpPacket::MAX_IP_COUNT;
-    let raw_addresses = conf.ip_addresses();
+    let raw_addresses = conf.ip_addresses;
     if raw_addresses.len() > max_ip_count {
         log::warn!(
             "({})  More than {max_ip_count} IP addresses(max for VRRP) have been configured. Only first {max_ip_count} addresses will be used..",
-            conf.name()
+            conf.name
         );
     }
 
@@ -81,22 +81,22 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
             Err(err) => {
                 log::error!(
                     "({}) invalid IP address {ip_config:?}: {err}",
-                    conf.name()
+                    conf.name
                 );
             }
         }
     }
 
     let vr = VirtualRouter::new(VirtualRouterParams {
-        name: conf.name(),
-        vrid: conf.vrid(),
-        version: conf.version(),
+        name: conf.name,
+        vrid: conf.vrid,
+        version: conf.version,
         ipv4_addresses,
         ipv6_addresses,
-        priority: conf.priority(),
-        advert_interval: conf.advert_interval(),
-        preempt_mode: conf.preempt_mode(),
-        network_interface: conf.interface_name(),
+        priority: conf.priority,
+        advert_interval: conf.advert_interval,
+        preempt_mode: conf.preempt_mode,
+        network_interface: conf.interface_name,
     });
     log::info!("({}) Entered {:?} state.", vr.name, vr.fsm.state);
     vr
