@@ -341,8 +341,6 @@ fn process_vrrp_packet(
         return Ok(());
     }
 
-    // Which mac-vlan/address list this packet's family maps to, for the
-    // state-transition actions below.
     let (mac_vlan_iface, str_addresses) = match &vrrp_packet.addresses {
         VrrpAddresses::V4(_) => (
             vrouter.mac_vlan_interface_v4.clone(),
@@ -350,9 +348,6 @@ fn process_vrrp_packet(
         ),
         VrrpAddresses::V6(_) => match &vrouter.mac_vlan_interface_v6 {
             Some(iface) => (iface.clone(), vrouter.str_ipv6_addresses()),
-            // A v2 instance has no v6 side, so it should never have
-            // reached this branch (only the v6 listener decodes V6
-            // addresses, and only a v3 instance runs one).
             None => return Ok(()),
         },
     };

@@ -109,7 +109,7 @@ pub fn config_to_vr(conf: VrrpConfig) -> VirtualRouter {
 /// Bridges into async rtnetlink code from what is otherwise a synchronous
 /// call chain, so this must be invoked from within a multi-threaded tokio
 /// runtime.
-pub fn virtual_address_action(
+pub(crate) fn virtual_address_action(
     action: AddressAction,
     addresses: &[String],
     interface_name: &str,

@@ -32,7 +32,7 @@ pub(crate) async fn vrrp_process(items: crate::TaskItems) -> NetResult<()> {
     let vrouter = items.vrouter;
 
     loop {
-        let (buf, src) = match listener.recv(unspec_addr).await {
+        let (buf, _) = match listener.recv(unspec_addr).await {
             Ok(buf) => buf,
             Err(err) => {
                 log::warn!("Error receiving VRRP packet: {err}");

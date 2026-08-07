@@ -187,7 +187,7 @@ impl VrrpListener {
             Type::RAW,
             Some(Protocol::from(VRRP_PROTOCOL_NUMBER)),
         )?;
-        sock.bind_device(Some(ifname.as_bytes()));
+        sock.bind_device(Some(ifname.as_bytes()))?;
 
         let ifindex = if_index(ifname)?;
 

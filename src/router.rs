@@ -10,23 +10,23 @@ use crate::{VrrpAddresses, VrrpVersion, network};
 
 #[derive(Debug, Clone)]
 pub struct VirtualRouter {
-    pub name: String,
-    pub vrid: u8,
-    pub version: VrrpVersion,
-    pub ipv4_addresses: Vec<Ipv4Net>,
-    pub ipv6_addresses: Vec<Ipv6Net>,
-    pub priority: u8,
-    pub skew_time: f32,
-    pub advert_interval: u8,
-    pub master_down_interval: f32,
-    pub preempt_mode: bool,
-    pub network_interface: String,
-    pub mac_vlan_interface_v4: String,
+    pub(crate) name: String,
+    pub(crate) vrid: u8,
+    pub(crate) version: VrrpVersion,
+    pub(crate) ipv4_addresses: Vec<Ipv4Net>,
+    pub(crate) ipv6_addresses: Vec<Ipv6Net>,
+    pub(crate) priority: u8,
+    pub(crate) skew_time: f32,
+    pub(crate) advert_interval: u8,
+    pub(crate) master_down_interval: f32,
+    pub(crate) preempt_mode: bool,
+    pub(crate) network_interface: String,
+    pub(crate) mac_vlan_interface_v4: String,
     /// `Some` only for a v3 instance (v2 never creates a v6 mac-vlan).
-    pub mac_vlan_interface_v6: Option<String>,
-    pub primary_ip: Ipv4Addr,
-    pub primary_ip_v6: Option<Ipv6Addr>,
-    pub fsm: VirtualRouterMachine,
+    pub(crate) mac_vlan_interface_v6: Option<String>,
+    pub(crate) primary_ip: Ipv4Addr,
+    pub(crate) primary_ip_v6: Option<Ipv6Addr>,
+    pub(crate) fsm: VirtualRouterMachine,
 }
 
 impl VirtualRouter {
@@ -46,7 +46,7 @@ impl VirtualRouter {
         self.ipv6_addresses.iter().map(|a| a.to_string()).collect()
     }
 
-    pub fn new(params: VirtualRouterParams) -> Self {
+    pub(crate) fn new(params: VirtualRouterParams) -> Self {
         let VirtualRouterParams {
             name,
             vrid,
@@ -179,14 +179,14 @@ impl VirtualRouter {
     }
 }
 
-pub struct VirtualRouterParams {
-    pub name: String,
-    pub vrid: u8,
-    pub version: VrrpVersion,
-    pub ipv4_addresses: Vec<Ipv4Net>,
-    pub ipv6_addresses: Vec<Ipv6Net>,
-    pub priority: u8,
-    pub advert_interval: u8,
-    pub preempt_mode: bool,
-    pub network_interface: String,
+pub(crate) struct VirtualRouterParams {
+    pub(crate) name: String,
+    pub(crate) vrid: u8,
+    pub(crate) version: VrrpVersion,
+    pub(crate) ipv4_addresses: Vec<Ipv4Net>,
+    pub(crate) ipv6_addresses: Vec<Ipv6Net>,
+    pub(crate) priority: u8,
+    pub(crate) advert_interval: u8,
+    pub(crate) preempt_mode: bool,
+    pub(crate) network_interface: String,
 }

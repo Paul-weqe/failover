@@ -53,10 +53,11 @@ pub enum ConfigError {
     #[error("unable to initialize logging: {0}")]
     LoggingSetup(#[source] log4rs::config::runtime::ConfigErrors),
 
-    #[error(
-        "VRRP version {0} is invalid for instance; must be 2 or 3"
-    )]
+    #[error("VRRP version {0} is invalid for instance; must be 2 or 3")]
     InvalidVersion(u8),
+
+    #[error("Invalid IP Formatting: {0}")]
+    IPFormatting(String),
 
     #[error(
         "duplicate Virtual Router name {name:?} for VRRPv{version}; names must be unique per version (rename one of the two, or give them different \"version\" values)"
