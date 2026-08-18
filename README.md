@@ -5,6 +5,6 @@
 
 # Failover
 
-Failover is a VRRP(version 2) implementation currently configured for Ubuntu(soon introducing other Linux and windows systems).
+Failover is a VRRP implementation written in Rust.
 
 If you want to install and run it directly, find information in the [docs](https://failover-docs.readthedocs.io/).
