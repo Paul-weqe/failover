@@ -247,14 +247,14 @@ fn validate_configs(configs: &[Config]) -> ConfigResult<()> {
         match version {
             VrrpVersion::V2 => {
                 for addr in &cfg.ip_addresses {
-                    if matches!(IpNet::from_str(&addr), Ok(IpNet::V6(_))) {
+                    if matches!(IpNet::from_str(addr), Ok(IpNet::V6(_))) {
                         return Err(ConfigError::Ipv6NotSupportedInV2 {
                             name: cfg.name.clone(),
                             address: addr.to_string(),
                         });
                     }
                     // Check for if the IPV4 entered is valid.
-                    if !matches!(IpNet::from_str(&addr), Ok(IpNet::V4(_))) {
+                    if !matches!(IpNet::from_str(addr), Ok(IpNet::V4(_))) {
                         return Err(ConfigError::IPFormatting(
                             addr.to_string(),
                         ));

@@ -1,4 +1,8 @@
-
 services:
   failover:
     build: .
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./vrrp-config.json:/etc/failover/vrrp-config.json
