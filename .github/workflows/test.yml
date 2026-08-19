@@ -44,6 +44,16 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    # Removes the 'v' agead of version tags.
+    - name: Set version tag
+      id: version
+      run: |
+        if [[ ${{ github.ref_name }} == v* ]]; then
+          echo "VERSION=${github.ref_name#v}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
@@ -52,3 +62,4 @@ jobs:
         tags: |
           ghcr.io/paul-weqe/${{ github.event.repository.name }}:latest
           ghcr.io/paul-weqe/${{ github.event.repository.name }}:${{ github.sha }}
+          ghcr.io/paul-weqe/${{ github.event.repository.name }}:${{ steps.version.outputs.VERSION }}
